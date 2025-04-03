@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: university_food_system-web
+    volumes:
+      - .:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+      - ./university_food_system/static:/app/university_food_system/static
+      - ./staticfiles:/app/staticfiles
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DJANGO_DEBUG=True
+      - DATABASE_HOST=db
+      - DATABASE_PORT=5432
+      - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+      - DJANGO_STATIC_URL=/static/
+      - DJANGO_STATIC_ROOT=/app/staticfiles
+      - DJANGO_MEDIA_URL=/media/
+      - DJANGO_MEDIA_ROOT=/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: postgres:15.3-alpine
+    container_name: university_food_system-db
+    restart: always
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST_AUTH_METHOD=md5
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRESQL_USERNAME} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7.2
+    container_name: university_food_system-redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    env_file:
+      - .env
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  celery:
+    build: .
+    container_name: university_food_system-celery
+    command: celery -A university_food_system worker -l info
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_volume:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/staticfiles
+      o: bind
+  media_volume:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${PWD}/media
+      o: bind
+
+networks:
+  app_network:
+    driver: bridge
