@@ -9,16 +9,11 @@ services:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
       - ./university_food_system/static:/app/university_food_system/static
-      - ./staticfiles:/app/staticfiles
     ports:
       - "8000:8000"
     env_file:
       - .env
     environment:
-      - DJANGO_DEBUG=True
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
       - DJANGO_STATIC_URL=/static/
       - DJANGO_STATIC_ROOT=/app/staticfiles
       - DJANGO_MEDIA_URL=/media/
@@ -31,7 +26,7 @@ services:
     networks:
       - app_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -51,10 +46,9 @@ services:
     env_file:
       - .env
     environment:
-      - POSTGRES_HOST_AUTH_METHOD=md5
       - PGDATA=/var/lib/postgresql/data/pgdata
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRESQL_USERNAME} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -116,14 +110,14 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: ${PWD}/staticfiles
       o: bind
+      device: ${PWD}/staticfiles
   media_volume:
     driver: local
     driver_opts:
       type: none
-      device: ${PWD}/media
       o: bind
+      device: ${PWD}/media
 
 networks:
   app_network:

@@ -126,10 +126,10 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.getenv('POSTGRES_DB', 'university_food_system'),
-        'USER': os.getenv('POSTGRESQL_USERNAME', 'postgres'),
-        'PASSWORD': os.getenv('POSTGRESQL_PASSWORD', 'postgres'),
-        'HOST': os.getenv('DATABASE_HOST', 'pgbouncer'),
-        'PORT': os.getenv('DATABASE_PORT', '6432'),
+        'USER': os.getenv('POSTGRES_USERNAME', 'djangouser'),
+        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'your_secure_postgres_password'),
+        'HOST': os.getenv('DATABASE_HOST', 'db'),
+        'PORT': os.getenv('DATABASE_PORT', '5432'),
         'OPTIONS': {
             'sslmode': 'disable',
         },
@@ -181,9 +181,14 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 WHITENOISE_USE_FINDERS = True
 WHITENOISE_MANIFEST_STRICT = False
 
-# Media files
+# Media files configuration
 MEDIA_URL = os.environ.get('DJANGO_MEDIA_URL', '/media/')
 MEDIA_ROOT = os.environ.get('DJANGO_MEDIA_ROOT', BASE_DIR / 'media')
+
+# Custom file storage to handle permissions
+DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
+FILE_UPLOAD_PERMISSIONS = 0o666
+FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o777
 
 # Security settings
 SECURE_SSL_REDIRECT = False
