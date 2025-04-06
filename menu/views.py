@@ -138,7 +138,7 @@ class DailyMenuView(APIView):
                     queryset=DailyMenuItem.objects.select_related('food').prefetch_related(
                         Prefetch(
                             'time_slots',
-                            queryset=TimeSlot.objects.all() if user.role == "admin" 
+                            queryset=TimeSlot.objects.all() if user.role == "admin" and requested_date == current_date
                             else TimeSlot.objects.filter(end_time__gt=current_iran_time)
                         )
                     )
