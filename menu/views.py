@@ -131,19 +131,35 @@ class DailyMenuView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Optimize query with select_related and prefetch_related
-            daily_menu = DailyMenu.objects.select_related().prefetch_related(
-                Prefetch(
-                    'items',
-                    queryset=DailyMenuItem.objects.select_related('food').prefetch_related(
-                        Prefetch(
+            if requested_date == current_date:
+                # Optimize query with select_related and prefetch_related
+                daily_menu = DailyMenu.objects.select_related().prefetch_related(
+                    Prefetch(
+                        'items',
+                        queryset=DailyMenuItem.objects.select_related('food').prefetch_related(
+                            Prefetch(
                             'time_slots',
-                            queryset=TimeSlot.objects.all() if user.role == "admin" and requested_date == current_date
+                            queryset=TimeSlot.objects.all() if user.role == "admin"
                             else TimeSlot.objects.filter(end_time__gt=current_iran_time)
                         )
                     )
                 )
-            ).get(
+                ).get(
+                Q(date=date) & Q(meal_type=meal_type)
+                )
+            else:
+                # Optimize query with select_related and prefetch_related
+                daily_menu = DailyMenu.objects.select_related().prefetch_related(
+                    Prefetch(
+                        'items',
+                        queryset=DailyMenuItem.objects.select_related('food').prefetch_related(
+                            Prefetch(
+                            'time_slots',
+                            queryset=TimeSlot.objects.all()
+                        )
+                    )
+                )
+                ).get(
                 Q(date=date) & Q(meal_type=meal_type)
             )
 
