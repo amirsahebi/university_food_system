@@ -23,12 +23,12 @@ from .views import health_check
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('health/', health_check, name='health_check'),
-    path('auth/', include('users.urls')),
-    path('foods/', include('food.urls')),
-    path('menu/', include('menu.urls')),
-    path('core/', include('core.urls')),
-    path('reports/', include('reports.urls')),
-    path('orders/', include('orders.urls')),
-    path('payments/', include('payments.urls')),
+    path('api/auth/', include('users.urls')),
+    path('api/foods/', include('food.urls')),
+    path('api/menu/', include('menu.urls')),
+    path('api/core/', include('core.urls')),
+    path('api/reports/', include('reports.urls')),
+    path('api/orders/', include('orders.urls')),
+    path('api/payments/', include('payments.urls')),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT) + \
     static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
