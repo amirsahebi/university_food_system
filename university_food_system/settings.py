@@ -40,6 +40,17 @@ if ZARINPAL_MERCHANT_ID == 'placeholder_merchant_id':
     warnings.warn("Using placeholder ZARINPAL_MERCHANT_ID. Please replace with a valid merchant ID.", RuntimeWarning)
 print(f"Loaded ZARINPAL_MERCHANT_ID: {ZARINPAL_MERCHANT_ID}")  # Debug print
 
+# SMS Configuration
+SMS_API_URL = os.environ.get('SMS_API_URL', 'https://api.sms.ir/v1/send/verify')
+SMS_API_KEY = os.environ.get('SMS_API_KEY', '')
+SMS_TEMPLATE_ID = os.environ.get('SMS_TEMPLATE_ID', '123456')
+
+# Validate SMS configuration
+if not SMS_API_KEY:
+    warnings.warn("SMS_API_KEY is not set. SMS functionality will not work.", RuntimeWarning)
+
+print(f"Loaded SMS_API_URL: {SMS_API_URL}")  # Debug print
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'your-secret-key-here')
 

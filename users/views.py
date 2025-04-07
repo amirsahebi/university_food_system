@@ -6,14 +6,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.core.cache import cache
 from django.utils.timezone import now, timedelta
-from kavenegar import KavenegarAPI
 from .models import User, OTP
 from .serializers import UserSerializer,UserProfileUpdateSerializer
 import re
 from django.contrib.auth import authenticate
-from sms_ir import SmsIr
-import requests
-import json
+from django.conf import settings
+import os
+from .utils import SMSService
 
 
 class SendOTPView(APIView):
@@ -24,8 +23,8 @@ class SendOTPView(APIView):
         if not phone_number:
             return Response({"error": "Phone number is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Validate phone number format
-        if not re.match(r'^(?:\+98|0)?9\d{9}$', phone_number):
+        # Use the utility method to validate phone number
+        if not SMSService.validate_phone_number(phone_number):
             return Response({"error": "Invalid phone number format"}, status=status.HTTP_400_BAD_REQUEST)
 
         # Rate limit: Check cache
@@ -43,32 +42,19 @@ class SendOTPView(APIView):
         otp_code = OTP.generate_otp()
         OTP.objects.create(phone_number=phone_number, otp=otp_code)
 
-        # Send OTP via SMS
-        try:
-            url = "https://api.sms.ir/v1/send/verify"
-            headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'text/plain',
-                'x-api-key': 'AvlnbwJn9oPDn9BCcbsyacENDj4qkeUnOJkf3zCIvIGIyJeS'
-            }
-
-            data = {
-                "mobile": phone_number,
-                "templateId": 123456,
-                "parameters": [{"name": "Code", "value": otp_code}]
-            }
-
-            response = requests.post(url, headers=headers, data=json.dumps(data))
-            print(otp_code)  # For debugging (remove in production)
-            
-        except Exception as e:
-            return Response({"error": f"Failed to send OTP: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Send OTP via SMS using the utility
+        sms_result = SMSService.send_otp(phone_number, otp_code)
+        
+        if sms_result['status'] == 'error':
+            return Response(
+                {"error": sms_result['message']}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         # **Set cache to enforce rate limit (5 min = 300 seconds)**
         cache.set(cache_key, True, timeout=300)
 
         return Response({"message": "OTP sent successfully"})
-
 
 
 class VerifyOTPView(APIView):
@@ -187,6 +173,10 @@ class RequestPasswordResetView(APIView):
         if not phone_number:
             return Response({"error": "Phone number is required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Validate phone number format
+        if not SMSService.validate_phone_number(phone_number):
+            return Response({"error": "Invalid phone number format"}, status=status.HTTP_400_BAD_REQUEST)
+
         # Check if user exists
         if not User.objects.filter(phone_number=phone_number).exists():
             return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -201,72 +191,17 @@ class RequestPasswordResetView(APIView):
         otp_code = OTP.generate_otp()
         OTP.objects.create(phone_number=phone_number, otp=otp_code)
 
-        # Send OTP via SMS
-        try:
-            url = "https://api.sms.ir/v1/send/verify"
-            headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'text/plain',
-                'x-api-key': 'AvlnbwJn9oPDn9BCcbsyacENDj4qkeUnOJkf3zCIvIGIyJeS'
-            }
+        # Send OTP via SMS using the utility
+        sms_result = SMSService.send_otp(phone_number, otp_code)
+        
+        if sms_result['status'] == 'error':
+            return Response(
+                {"error": sms_result['message']}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-            data = {
-                "mobile": phone_number,
-                "templateId": 123456,
-                "parameters": [{"name": "Code", "value": otp_code}]
-            }
-
-            response = requests.post(url, headers=headers, data=json.dumps(data))
-
-        except Exception as e:
-            return Response({"error": f"Failed to send OTP: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        # **Set cache to enforce rate limit (5 min = 300 seconds)**
+        # Set cache to enforce rate limit (5 min = 300 seconds)
         cache.set(cache_key, True, timeout=300)
-
-        return Response({"message": "Password reset OTP sent successfully"})
-    """Send an OTP for password reset."""
-    def post(self, request):
-        phone_number = request.data.get('phone_number')
-
-        if not phone_number:
-            return Response({"error": "Phone number is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check if user exists
-        if not User.objects.filter(phone_number=phone_number).exists():
-            return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        # Generate OTP and send it
-        otp_code = OTP.generate_otp()
-        OTP.objects.create(phone_number=phone_number, otp=otp_code)
-
-        # Send OTP via SMS
-        try:
-            url = "https://api.sms.ir/v1/send/verify"
-            headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'text/plain',
-                'x-api-key': 'AvlnbwJn9oPDn9BCcbsyacENDj4qkeUnOJkf3zCIvIGIyJeS'
-            }
-
-            # Define the request body
-            data = {
-                "mobile": phone_number,
-                "templateId": 123456,
-                "parameters": [
-                    {
-                        "name": "Code",
-                        "value": otp_code
-                    }
-                ]
-            }
-
-            # Send the POST request
-            response = requests.post(url, headers=headers, data=json.dumps(data))
-            print(response)
-            print(otp_code)
-        except Exception as e:
-            return Response({"error": f"Failed to send OTP: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({"message": "Password reset OTP sent successfully"})
 
