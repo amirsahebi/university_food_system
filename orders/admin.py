@@ -6,7 +6,7 @@ class ReservationAdmin(admin.ModelAdmin):
     list_display = ('id', 'student', 'food', 'time_slot', 'reserved_date', 'has_voucher', 'price', 'status')
     list_filter = ('status', 'reserved_date', 'has_voucher')
     search_fields = ('student__phone_number', 'food__name', 'status')
-    readonly_fields = ('price', 'qr_code')
+    readonly_fields = ('price', 'delivery_code')
     list_editable = ('status',)
 
     def get_queryset(self, request):

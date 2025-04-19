@@ -1,5 +1,8 @@
 import requests
 from django.conf import settings
+from core.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 ZARINPAL_REQUEST_URL = settings.ZARINPAL_REQUEST_URL
 ZARINPAL_VERIFY_URL = settings.ZARINPAL_VERIFY_URL
@@ -8,10 +11,11 @@ MERCHANT_ID = settings.ZARINPAL_MERCHANT_ID
 
 def request_payment(amount, callback_url, user):
     """Send payment request to ZarinPal."""
-    print(f"Using merchant ID: {MERCHANT_ID}")  # Debug print
+    logger.info(f"Initiating payment request for user {user.id} amount {amount}")
+    
     data = {
         "merchant_id": MERCHANT_ID,
-        "amount": amount,
+        "amount": float(amount * 10),  # Convert Decimal to float
         "callback_url": callback_url,
         "description": f"Payment by {user.phone_number}",
         "metadata": {
@@ -19,17 +23,33 @@ def request_payment(amount, callback_url, user):
             "email": user.email or "",
         }
     }
-    print(f"Request data: {data}")  # Debug print
-    response = requests.post(ZARINPAL_REQUEST_URL, json=data)
-    return response.json()
+    logger.debug(f"Payment request data: {data}")
+    
+    try:
+        response = requests.post(ZARINPAL_REQUEST_URL, json=data, timeout=10)
+        response.raise_for_status()
+        logger.debug(f"Payment request response: {response.text}")
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Payment request failed: {str(e)}")
+        raise
 
 def verify_payment(amount, authority):
     """Verify payment with ZarinPal."""
+    logger.info(f"Verifying payment with authority {authority} amount {amount}")
+    
     data = {
         "merchant_id": MERCHANT_ID,
-        "amount": amount,
+        "amount": amount * 10,
         "authority": authority
     }
-    response = requests.post(ZARINPAL_VERIFY_URL, json=data)
+    logger.debug(f"Payment verification data: {data}")
     
-    return response.json()
+    try:
+        response = requests.post(ZARINPAL_VERIFY_URL, json=data, timeout=10)
+        response.raise_for_status()
+        logger.debug(f"Payment verification response: {response.text}")
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Payment verification failed: {str(e)}")
+        raise

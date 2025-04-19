@@ -20,7 +20,11 @@ from django.conf import settings
 from django.conf.urls.static import static
 from .views import health_check
 
+def trigger_error(request):
+    division_by_zero = 1 / 0
+
 urlpatterns = [
+    path('sentry-debug/', trigger_error),
     path('admin/', admin.site.urls),
     path('health/', health_check, name='health_check'),
     path('api/auth/', include('users.urls')),

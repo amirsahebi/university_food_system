@@ -5,7 +5,6 @@ from rest_framework import status
 from .models import Reservation, TimeSlot
 from .serializers import ReservationSerializer, CreateReservationSerializer
 from university_food_system.permissions import (
-    IsChefOrAdmin,
     IsStudentOrAdmin,
     IsChefOrReceiverOrAdmin,
     IsReceiverOrAdmin,
@@ -14,8 +13,8 @@ from django.db.models import Q
 import pytz
 from datetime import datetime
 
-class ChefOrdersView(APIView):
-    permission_classes = [IsAuthenticated, IsChefOrAdmin]
+class ReceiverOrdersView(APIView):
+    permission_classes = [IsAuthenticated, IsReceiverOrAdmin]
 
     def get(self, request):
         """Retrieve all orders for chefs to prepare."""
@@ -31,7 +30,7 @@ class ChefOrdersView(APIView):
 
 
 class UpdateOrderStatusView(APIView):
-    permission_classes = [IsAuthenticated, IsChefOrAdmin]
+    permission_classes = [IsAuthenticated, IsReceiverOrAdmin]
 
     def patch(self, request, id):
         """Update the status of an order."""
@@ -58,53 +57,21 @@ class PlaceOrderView(APIView):
         serializer = CreateReservationSerializer(data=request.data, context={'request': request})
         print(request.data)
         if serializer.is_valid():
-            # Get the time slot and check its capacity
-            time_slot_id = request.data.get('time_slot')
-            try:
-                time_slot = TimeSlot.objects.get(id=time_slot_id)
-                
-                # Check if time slot has expired
-                iran_tz = pytz.timezone('Asia/Tehran')
-                current_iran_time = datetime.now(iran_tz).time()
-                
-                if time_slot.end_time <= current_iran_time:
-                    return Response(
-                        {"error": "This time slot has expired"}, 
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                
-                if time_slot.capacity <= 0:
-                    return Response(
-                        {"error": "This time slot is full"}, 
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                
-                # Check daily menu item capacity
-                daily_menu_item = time_slot.daily_menu_item
-                if daily_menu_item.daily_capacity <= 0:
-                    return Response(
-                        {"error": "This food item is out of stock"}, 
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            except TimeSlot.DoesNotExist:
-                return Response(
-                    {"error": "Time slot not found"}, 
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
             # Create the reservation (capacity updates will be handled by signals)
             reservation = serializer.save(student=request.user)
             
-            # Generate QR code and save
-            reservation.generate_qr_code()
-            reservation.save()
+            # The delivery code will be automatically generated in the save method
+            # No need to call generate_delivery_code() explicitly
             
-            return Response(ReservationSerializer(reservation).data, status=status.HTTP_201_CREATED)
+            # Get the full reservation data for response
+            response_data = ReservationSerializer(reservation).data
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PendingOrdersView(APIView):
-    permission_classes = [IsAuthenticated, IsChefOrReceiverOrAdmin]
+    permission_classes = [IsAuthenticated, IsReceiverOrAdmin]
 
     def get(self, request):
         """Retrieve all pending orders."""
@@ -141,30 +108,57 @@ class StudentOrdersView(APIView):
         serializer = ReservationSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-class RetrieveReservationByQRCodeView(APIView):
+class RetrieveReservationByDeliveryCodeView(APIView):
     permission_classes = [IsAuthenticated, IsReceiverOrAdmin]
 
     def post(self, request):
-        """Retrieve reservation details by encrypted QR code data."""
-        encrypted_qr_code_data = request.data.get('qr_code_data')
-        print(request.data)
-
-        if not encrypted_qr_code_data:
-            return Response({"error": "QR code data is required"}, status=status.HTTP_400_BAD_REQUEST)
-
+        """Retrieve reservation details by delivery code."""
+        delivery_code = request.data.get('delivery_code')
+        meal_type = request.data.get('meal_type')
+        date = request.data.get('date')
+        
+        # Validate required fields
+        missing_fields = []
+        if not delivery_code:
+            missing_fields.append("delivery_code")
+        if not meal_type:
+            missing_fields.append("meal_type")
+        if not date:
+            missing_fields.append("date")
+            
+        if missing_fields:
+            return Response(
+                {"error": f"Required fields missing: {', '.join(missing_fields)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate delivery code format (must be 6 digits)
+        if not (delivery_code.isdigit() and len(delivery_code) == 6):
+            return Response({"error": "Delivery code must be a 6-digit number"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Validate meal_type
+        if meal_type not in ['lunch', 'dinner']:
+            return Response({"error": "meal_type must be either 'lunch' or 'dinner'"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        # Validate date format
         try:
-            # Decrypt QR code data
-            reservation = Reservation.objects.all()[0]  # Dummy instance for accessing decrypt_data method
-            decrypted_data = reservation.decrypt_data(encrypted_qr_code_data)
-
-            # Parse decrypted data to get the reservation ID
-            reservation_id = int(decrypted_data.split(":")[1].split(",")[0].strip())
-            reservation = Reservation.objects.get(id=reservation_id)
-        except (ValueError, IndexError, Reservation.DoesNotExist):
-            return Response({"error": "Invalid or unknown QR code data"}, status=status.HTTP_404_NOT_FOUND)
-
-        serializer = ReservationSerializer(reservation)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+            parsed_date = datetime.strptime(date, '%Y-%m-%d').date()
+        except ValueError:
+            return Response({"error": "Invalid date format. Use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
+            
+        
+        try:
+            # Build query with all required filters
+            reservation = Reservation.objects.get(
+                delivery_code=delivery_code,
+                meal_type=meal_type,
+                reserved_date=parsed_date
+            )
+            data = ReservationSerializer(reservation).data        
+            return Response(data, status=status.HTTP_200_OK)
+            
+        except Reservation.DoesNotExist:
+            return Response({"error": "Invalid or unknown delivery code"}, status=status.HTTP_404_NOT_FOUND)
 
 class PickedUpOrdersView(APIView):
     permission_classes = [IsAuthenticated, IsReceiverOrAdmin]

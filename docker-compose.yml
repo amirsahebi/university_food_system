@@ -9,6 +9,7 @@ services:
       - static_volume:/app/staticfiles
       - media_volume:/app/media
       - ./university_food_system/static:/app/university_food_system/static
+      - ./logs:/app/logs
     ports:
       - "8000:8000"
     env_file:
@@ -118,6 +119,12 @@ volumes:
       type: none
       o: bind
       device: ./app/media
+  logs_volume:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./logs
 
 networks:
   app_network:

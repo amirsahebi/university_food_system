@@ -3,14 +3,7 @@ from django.contrib.auth import get_user_model
 from food.models import Food
 from core.models import Voucher
 from menu.models import TimeSlot
-import qrcode
-from io import BytesIO
-from django.core.files import File
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import pad, unpad
-import base64
-from django.conf import settings
-
+import random
 User = get_user_model()
 
 class Reservation(models.Model):
@@ -30,32 +23,40 @@ class Reservation(models.Model):
     has_voucher = models.BooleanField(default=False)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending_payment')
-    qr_code = models.TextField(blank=True, null=True)
+    delivery_code = models.CharField(max_length=6, blank=True, null=True, unique=True)
+    reservation_number = models.PositiveIntegerField(blank=True, null=True, help_text="Sequential number for each meal and day")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(null=True, blank=True)
 
-    def encrypt_data(self, data):
-        """Encrypt data using AES encryption."""
-        key = settings.SECRET_KEY[:32]  # Ensure the key is 32 bytes for AES-256
-        cipher = AES.new(key.encode('utf-8'), AES.MODE_CBC)
-        iv = cipher.iv  # Initialization vector
-        encrypted_data = cipher.encrypt(pad(data.encode('utf-8'), AES.block_size))
-        return base64.b64encode(iv + encrypted_data).decode('utf-8')
-
-    def decrypt_data(self, encrypted_data):
-        """Decrypt data using AES decryption."""
-        key = settings.SECRET_KEY[:32]
-        decoded_data = base64.b64decode(encrypted_data)
-        iv = decoded_data[:16]
-        encrypted_message = decoded_data[16:]
-        cipher = AES.new(key.encode('utf-8'), AES.MODE_CBC, iv)
-        return unpad(cipher.decrypt(encrypted_message), AES.block_size).decode('utf-8')
-
-    def generate_qr_code(self):
-        """Generate a QR code with encrypted data and save it as a string."""
-        qr_data = f"Reservation ID: {self.id}, Student: {self.student.phone_number}, Food: {self.food.name}, Status: {self.status}"
-        encrypted_qr_data = self.encrypt_data(qr_data)
-        self.qr_code = encrypted_qr_data
+    def assign_reservation_number(self):
+        """Assign a sequential reservation number for this meal type and date."""
+        if not self.reservation_number:
+            # Get the highest reservation number for this meal type and date
+            highest = Reservation.objects.filter(
+                meal_type=self.meal_type,
+                reserved_date=self.reserved_date
+            ).aggregate(models.Max('reservation_number'))
+            
+            # Start from 1 if no reservations exist for this meal/day
+            current_highest = highest['reservation_number__max'] or 0
+            
+            # Assign the next number (max 9999)
+            self.reservation_number = min(current_highest + 1, 9999)
+    
+    def generate_delivery_code(self):
+        """Generate a unique 6-digit delivery code based on reservation number + random digits."""
+        # Ensure we have a reservation number assigned
+        if not self.reservation_number:
+            self.assign_reservation_number()
+            
+        # First 4 digits: reservation number padded to 4 digits
+        seq_part = str(self.reservation_number).zfill(4)
+        
+        # Last 2 digits: random digits for unpredictability
+        random_part = str(random.SystemRandom().randint(0, 99)).zfill(2)
+        
+        # Combine to form a 6-digit delivery code
+        self.delivery_code = seq_part + random_part
         
 
     def calculate_price(self):
@@ -63,8 +64,22 @@ class Reservation(models.Model):
         return self.food.price-global_voucher_price if self.has_voucher else self.food.price
 
     def save(self, *args, **kwargs):
+        # Calculate price if not already set
         if not self.price:
             self.price = self.calculate_price()
+        
+            # If price is zero and voucher is applied, set status to waiting
+            if self.price == 0 and self.has_voucher:
+                self.status = 'waiting'
+        
+        # Assign reservation number if not already assigned
+        if not self.reservation_number:
+            self.assign_reservation_number()
+        
+        # Generate delivery code if not already generated
+        if not self.delivery_code:
+            self.generate_delivery_code()
+        
         super().save(*args, **kwargs)
 
     def __str__(self):

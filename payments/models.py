@@ -1,7 +1,10 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from orders.models import Reservation
+from core.logging_utils import get_logger
+
 User = get_user_model()
+logger = get_logger(__name__)
 
 class Payment(models.Model):
     STATUS_CHOICES = [
@@ -20,3 +23,11 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"Payment {self.id} - {self.user.phone_number} - {self.status}"
+
+    def save(self, *args, **kwargs):
+        is_new = self.pk is None
+        super().save(*args, **kwargs)
+        if is_new:
+            logger.info(f"New payment created: {self.id} for user {self.user.id}")
+        else:
+            logger.info(f"Payment updated: {self.id} status changed to {self.status}")

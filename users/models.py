@@ -33,7 +33,6 @@ class User(AbstractUser):
     last_name = models.CharField(max_length=255)
     role = models.CharField(max_length=10, choices=[
         ('student', 'دانشجو'),
-        ('chef', 'آشپز'),
         ('receiver', 'پذیرنده'),
         ('admin', 'مدیر'),
     ])

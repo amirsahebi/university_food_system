@@ -140,7 +140,7 @@ class DailyMenuView(APIView):
                             Prefetch(
                             'time_slots',
                             queryset=TimeSlot.objects.all() if user.role == "admin"
-                            else TimeSlot.objects.filter(end_time__gt=current_iran_time)
+                            else TimeSlot.objects.filter(start_time__gt=current_iran_time)
                         )
                     )
                 )

@@ -53,16 +53,21 @@ class CreateReservationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """
         Override create() to handle safe time slot capacity updates.
+        Also updates daily menu item capacity and availability status.
         """
         with transaction.atomic():  # Prevents race conditions
             time_slot = validated_data['time_slot']
+            daily_menu_item = time_slot.daily_menu_item
 
-            # Double-check capacity inside the transaction
+            # Double-check time slot capacity inside the transaction
             if time_slot.capacity <= 0:
                 raise serializers.ValidationError("The selected time slot is full. Please choose a different slot.")
 
-            # Ensure the end_time hasn't passed again inside transaction
+            # Double-check daily menu item capacity inside the transaction
+            if daily_menu_item.daily_capacity <= 0 or not daily_menu_item.is_available:
+                raise serializers.ValidationError("This menu item is no longer available. Please choose a different item.")
 
+            # Ensure the end_time hasn't passed again inside transaction
             # Get current time in Iran timezone
             iran_now = timezone.now().astimezone(IRAN_TZ)
             current_iran_time = iran_now.time()
@@ -70,9 +75,18 @@ class CreateReservationSerializer(serializers.ModelSerializer):
             if validated_data['reserved_date'] == datetime.today().date() and time_slot.start_time <= current_iran_time:
                 raise serializers.ValidationError("The selected time slot has already ended. Please choose a future time slot.")
 
-            # Reduce capacity
+            # Reduce time slot capacity
             time_slot.capacity -= 1
             time_slot.save()
+
+            # Reduce daily menu item capacity
+            daily_menu_item.daily_capacity -= 1
+            
+            # If capacity reaches zero, mark as unavailable
+            if daily_menu_item.daily_capacity <= 0:
+                daily_menu_item.is_available = False
+            
+            daily_menu_item.save()
 
             return super().create(validated_data)
 
@@ -98,5 +112,5 @@ class ReservationSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Reservation
-        fields = ['id', 'student', 'food', 'time_slot', 'meal_type', 'reserved_date', 'has_voucher', 'price', 'status', 'qr_code', 'created_at', 'updated_at']
-        read_only_fields = ['price', 'qr_code']
+        fields = ['id', 'student', 'food', 'time_slot', 'meal_type', 'reserved_date', 'has_voucher', 'price', 'status', 'reservation_number', 'delivery_code', 'created_at', 'updated_at']
+        read_only_fields = ['price', 'delivery_code']
