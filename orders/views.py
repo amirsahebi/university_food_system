@@ -67,7 +67,7 @@ class PlaceOrderView(APIView):
             response_data = ReservationSerializer(reservation).data
             
             return Response(response_data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(serializer.errors, status=status.HTTP_406_NOT_ACCEPTABLE)
 
 
 class PendingOrdersView(APIView):
