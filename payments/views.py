@@ -91,39 +91,60 @@ class PaymentVerifyView(APIView):
             logger.error("Invalid payment verification request: missing authority or status")
             return Response({"error": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if status_query != "OK":
-            logger.warn(f"Payment verification failed: status={status_query}")
-            return Response({"error": "Payment was not successful"}, status=status.HTTP_400_BAD_REQUEST)
-
         try:
             payment = Payment.objects.get(authority=authority, user=request.user)
             logger.info(f"Verifying payment {payment.id} for user {request.user.id}")
 
-            response = verify_payment(payment.amount, authority)
-            logger.debug(f"Payment verification response: {response}")
+            try:
+                # Verify payment with ZarinPal
+                response = verify_payment(payment.amount, authority)
+                logger.debug(f"Payment verification response: {response}")
 
-            if "data" in response and response["data"]["code"] in [100, 101]:
-                payment.ref_id = response["data"]["ref_id"]
-                payment.status = "paid"
+                if "data" in response and response["data"]["code"] in [100, 101]:
+                    # Update payment status and ref_id
+                    payment.ref_id = response["data"]["ref_id"]
+                    payment.status = 'paid'
+                    payment.save()
+                    
+                    # Update reservation status to 'waiting'
+                    payment.reservation.status = 'waiting'
+                    payment.reservation.save()
+                    
+                    return Response({
+                        "success": True,
+                        "ref_id": payment.ref_id
+                    })
+                else:
+                    # Payment verification failed
+                    payment.status = 'failed'
+                    payment.save()
+                    
+                    # Cancel the reservation
+                    payment.reservation.status = 'cancelled'
+                    payment.reservation.save()
+                    
+                    logger.warn(f"Payment verification failed with code: {response['data']['code']}")
+                    return Response({
+                        "error": "Payment verification failed",
+                        "code": response.get("data", {}).get("code", "Unknown error")
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            except Exception as e:
+                # Handle ZarinPal API errors (like 401)
+                logger.error(f"Payment verification failed: {str(e)}")
+                
+                # Update payment status to failed
+                payment.status = 'failed'
                 payment.save()
-                logger.info(f"Payment {payment.id} verified successfully, ref_id: {payment.ref_id}")
                 
-                # Update reservation status to waiting
-                try:
-                    reservation = Reservation.objects.get(id=payment.reservation_id)
-                    reservation.status = "waiting"
-                    reservation.save()
-                    logger.info(f"Reservation {reservation.id} status updated to waiting after successful payment")
-                except Reservation.DoesNotExist:
-                    logger.error(f"Reservation {payment.reservation_id} not found during payment verification")
-                    return Response({"error": "Reservation not found"}, status=status.HTTP_404_NOT_FOUND)
+                # Cancel the reservation
+                payment.reservation.status = 'cancelled'
+                payment.reservation.save()
                 
-                return Response(PaymentSerializer(payment).data, status=status.HTTP_200_OK)
-
-            payment.status = "failed"
-            payment.save()
-            logger.error(f"Payment verification failed: {response.get('errors', 'Unknown error')}")
-            return Response({"error": "Payment verification failed"}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({
+                    "error": str(e),
+                    "status": "failed"
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         except Payment.DoesNotExist:
             logger.error(f"Payment record not found for authority: {authority}")

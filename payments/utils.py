@@ -40,16 +40,38 @@ def verify_payment(amount, authority):
     
     data = {
         "merchant_id": MERCHANT_ID,
-        "amount": amount * 10,
+        "amount": float(amount * 10),  # Convert Decimal to float
         "authority": authority
     }
     logger.debug(f"Payment verification data: {data}")
     
     try:
         response = requests.post(ZARINPAL_VERIFY_URL, json=data, timeout=10)
+        
+        # Handle 401 Unauthorized specifically
+        if response.status_code == 401:
+            logger.error("ZarinPal API credentials are invalid")
+            raise Exception("Invalid ZarinPal API credentials. Please check your configuration.")
+            
         response.raise_for_status()
         logger.debug(f"Payment verification response: {response.text}")
-        return response.json()
+        
+        result = response.json()
+        
+        # Check ZarinPal's error code
+        if "data" not in result or "code" not in result["data"]:
+            logger.error(f"Invalid response format from ZarinPal: {result}")
+            raise Exception("Invalid response format from ZarinPal")
+            
+        if result["data"]["code"] not in [100, 101]:
+            logger.error(f"ZarinPal verification failed with code: {result['data']['code']}")
+            raise Exception(f"Payment verification failed with code: {result['data']['code']}")
+            
+        return result
+        
     except requests.RequestException as e:
         logger.error(f"Payment verification failed: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Payment verification failed with error: {str(e)}")
         raise

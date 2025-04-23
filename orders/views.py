@@ -201,3 +201,24 @@ class ReadyToPickupOrdersView(APIView):
         print(orders)
         serializer = ReservationSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class CancelReservationView(APIView):
+    permission_classes = [IsAuthenticated, IsStudentOrAdmin]
+
+    def delete(self, request, id):
+        """Allow a user to cancel their reservation if status is pending_payment."""
+        try:
+            reservation = Reservation.objects.get(id=id)
+        except Reservation.DoesNotExist:
+            return Response({"error": "Reservation not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if reservation.student != request.user:
+            return Response({"error": "You can only cancel your own reservation."}, status=status.HTTP_403_FORBIDDEN)
+
+        if reservation.status != 'pending_payment':
+            return Response({"error": "Reservation can only be cancelled if status is pending_payment."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reservation.status = 'cancelled'
+        reservation.save(update_fields=["status"])
+        return Response({"success": "Reservation cancelled."}, status=status.HTTP_200_OK)

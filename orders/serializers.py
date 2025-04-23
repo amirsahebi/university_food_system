@@ -42,8 +42,8 @@ class CreateReservationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("The selected time slot has already ended. Please choose a future time slot.")
         
 
-        # Prevent duplicate reservations for the same student, date, and meal type
-        if Reservation.objects.filter(student=student, reserved_date=reserved_date, meal_type=meal_type).exists():
+        # Prevent duplicate reservations for the same student, date, and meal type, except those in cancelled or pending_payment state
+        if Reservation.objects.filter(student=student, reserved_date=reserved_date, meal_type=meal_type).exclude(status__in=['cancelled', 'pending_payment']).exists():
             raise serializers.ValidationError(
                 "You already have a reservation for this date and meal type."
             )
@@ -74,19 +74,6 @@ class CreateReservationSerializer(serializers.ModelSerializer):
             
             if validated_data['reserved_date'] == datetime.today().date() and time_slot.start_time <= current_iran_time:
                 raise serializers.ValidationError("The selected time slot has already ended. Please choose a future time slot.")
-
-            # Reduce time slot capacity
-            time_slot.capacity -= 1
-            time_slot.save()
-
-            # Reduce daily menu item capacity
-            daily_menu_item.daily_capacity -= 1
-            
-            # If capacity reaches zero, mark as unavailable
-            if daily_menu_item.daily_capacity <= 0:
-                daily_menu_item.is_available = False
-            
-            daily_menu_item.save()
 
             return super().create(validated_data)
 

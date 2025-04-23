@@ -8,6 +8,7 @@ User = get_user_model()
 
 class Reservation(models.Model):
     STATUS_CHOICES = [
+        ('cancelled', 'Cancelled'),
         ('pending_payment', 'Pending Payment'),
         ('waiting', 'Waiting'),
         ('preparing', 'Preparing'),

@@ -1,7 +1,9 @@
 from django.db.models.signals import pre_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django.db import transaction
 from .models import Reservation
+from menu.models import DailyMenuItem
 from users.utils import SMSService
 import logging
 
@@ -11,23 +13,60 @@ logger = logging.getLogger(__name__)
 @receiver(pre_save, sender=Reservation)
 def handle_reservation_status_change(sender, instance, **kwargs):
     """
-    Signal to send notification when reservation status changes from 'preparing' to 'ready_to_pickup'
+    Signal to handle reservation status changes:
+    - Send notification when reservation status changes from 'preparing' to 'ready_to_pickup'
+    - Update capacity when status changes to 'waiting'
+    - Restore capacity when status changes to 'cancelled'
     """
     # First check if this is an existing reservation (not a new one)
     if instance.pk:
         try:
-            # Get the old instance to compare status
-            old_instance = Reservation.objects.get(pk=instance.pk)
-            
-            # Check if status is changing from 'preparing' to 'ready_to_pickup'
-            if old_instance.status == 'preparing' and instance.status == 'ready_to_pickup':
-                # Update the updated_at timestamp
-                instance.updated_at = timezone.now()
+            with transaction.atomic():
+                # Get the old instance to compare status
+                old_instance = Reservation.objects.get(pk=instance.pk)
                 
-                # Send notification to the student
-                send_ready_pickup_notification(instance)
+                # Handle waiting status change
+                if old_instance.status != 'waiting' and instance.status == 'waiting':
+                    # Update capacity
+                    instance.time_slot.capacity -= 1
+                    instance.time_slot.save()
+                    
+                    # Update daily menu item capacity
+                    daily_menu_item = instance.time_slot.daily_menu_item
+                    daily_menu_item.daily_capacity -= 1
+                    
+                    # If capacity reaches zero, mark as unavailable
+                    if daily_menu_item.daily_capacity <= 0:
+                        daily_menu_item.is_available = False
+                    daily_menu_item.save()
+                    
+                # Handle cancelled status change
+                elif old_instance.status == 'waiting' and instance.status == 'cancelled':
+                    # Restore capacity
+                    instance.time_slot.capacity += 1
+                    instance.time_slot.save()
+                    
+                    # Restore daily menu item capacity
+                    daily_menu_item = instance.time_slot.daily_menu_item
+                    daily_menu_item.daily_capacity += 1
+                    
+                    # If capacity was zero, make it available again
+                    if daily_menu_item.daily_capacity > 0:
+                        daily_menu_item.is_available = True
+                    daily_menu_item.save()
+                    
+                # Check if status is changing from 'preparing' to 'ready_to_pickup'
+                elif old_instance.status == 'preparing' and instance.status == 'ready_to_pickup':
+                    # Update the updated_at timestamp
+                    instance.updated_at = timezone.now()
+                    # Send notification to the student
+                    send_ready_pickup_notification(instance)
+                    
         except Reservation.DoesNotExist:
             pass  # This is a new reservation, no status change
+        except Exception as e:
+            logger.error(f"Error handling reservation status change: {str(e)}")
+            raise  # Re-raise the exception to trigger transaction rollback
 
 def send_ready_pickup_notification(reservation):
     """
