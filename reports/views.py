@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from orders.models import Reservation
 from django.db.models import Count, Q
+from django.db.models.functions import Trunc
 from django.utils.timezone import now
 from datetime import timedelta
 
@@ -53,16 +54,15 @@ class DailyOrderCountsView(APIView):
         daily_counts = (
             Reservation.objects
             .filter(
-                reserved_date__date__range=[start_date, today],
+                reserved_date__range=[start_date, today],
                 status__in=['waiting', 'preparing', 'ready_to_pickup', 'picked_up']
             )
-            .extra(select={'date': "date(created_at)"})
-            .values('date')
+            .values('reserved_date')
             .annotate(
                 order_count=Count('id'),
                 picked_up_count=Count('id', filter=Q(status='picked_up'))
             )
-            .order_by('date')
+            .order_by('reserved_date')
         )
 
         return Response(daily_counts, status=status.HTTP_200_OK)
