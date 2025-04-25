@@ -31,6 +31,7 @@ class ReservationLogsView(APIView):
                 "student": f"{reservation.student.first_name} {reservation.student.last_name}",
                 "food": reservation.food.name,
                 "status": reservation.status,
+                "reserved_date": reservation.reserved_date,
                 "created_at": reservation.created_at,
                 "updated_at": reservation.updated_at,
             }
@@ -52,7 +53,7 @@ class DailyOrderCountsView(APIView):
         daily_counts = (
             Reservation.objects
             .filter(
-                created_at__date__range=[start_date, today],
+                reserved_date__date__range=[start_date, today],
                 status__in=['waiting', 'preparing', 'ready_to_pickup', 'picked_up']
             )
             .extra(select={'date': "date(created_at)"})
