@@ -253,13 +253,14 @@ class UseTemplateForDailyView(APIView):
     def post(self, request):
         day = request.data.get('day')
         date = request.data.get('date')
+        meal_type = request.data.get('meal_type')
 
         if not day or not date:
             return Response({"error": "Both day and date are required."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Find the template menu for the specified day
         try:
-            template_menu = TemplateMenu.objects.get(day=day)
+            template_menu = TemplateMenu.objects.get(day=day, meal_type=meal_type)
         except TemplateMenu.DoesNotExist:
             return Response({"error": "Template menu not found for the specified day."}, status=status.HTTP_404_NOT_FOUND)
 
