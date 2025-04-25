@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from orders.models import Reservation
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils.timezone import now
 from datetime import timedelta
 
@@ -13,9 +13,18 @@ class ReservationLogsView(APIView):
 
     def get(self, request):
         """
-        Retrieve logs of reservations.
+        Retrieve logs of reservations for the last 3 days.
         """
-        reservations = Reservation.objects.select_related('student', 'food').all()
+        today = now().date()
+        start_date = today - timedelta(days=3)
+
+        reservations = Reservation.objects.select_related('student', 'food')\
+            .filter(
+                created_at__date__range=[start_date, today],
+                status__in=['waiting', 'preparing', 'ready_to_pickup', 'picked_up']
+            )\
+            .order_by('-created_at')
+
         logs = [
             {
                 "id": reservation.id,
@@ -41,12 +50,18 @@ class DailyOrderCountsView(APIView):
         start_date = today - timedelta(days=7)
 
         daily_counts = (
-            Reservation.objects.filter(created_at__date__range=[start_date, today])
-            .extra(select={'day': "date(created_at)"})
-            .values('day')
-            .annotate(order_count=Count('id'))
-            .order_by('day')
+            Reservation.objects
+            .filter(
+                created_at__date__range=[start_date, today],
+                status__in=['waiting', 'preparing', 'ready_to_pickup', 'picked_up']
+            )
+            .extra(select={'date': "date(created_at)"})
+            .values('date')
+            .annotate(
+                order_count=Count('id'),
+                picked_up_count=Count('id', filter=Q(status='picked_up'))
+            )
+            .order_by('date')
         )
 
-        response_data = [{"day": count['day'], "order_count": count['order_count']} for count in daily_counts]
-        return Response(response_data, status=status.HTTP_200_OK)
+        return Response(daily_counts, status=status.HTTP_200_OK)

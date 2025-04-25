@@ -11,16 +11,12 @@ from .serializers import (
     GetDailyMenuItemSerializer,
     GetDailyMenuSerializer,
     TemplateMenuSerializer,
-    TemplateMenuItemSerializer,
-    TimeSlotSerializer
 )
-import ast
 from university_food_system.permissions import IsAdminOnly, IsAdminOrReadOnly
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q, Prefetch
 from django.utils import timezone
 import pytz
-from typing import Dict, Any, Optional
 
 # Define Iran's timezone
 IRAN_TZ = pytz.timezone("Asia/Tehran")
@@ -31,14 +27,47 @@ class TemplateMenuView(APIView):
     """View for managing template menus."""
 
     def get(self, request):
-        template_menus = TemplateMenu.objects.prefetch_related('items').all()
-        serializer = TemplateMenuSerializer(template_menus, many=True, context={'request': request})
-        return Response(serializer.data)
+        day = request.query_params.get('day')
+        meal_type = request.query_params.get('meal_type')
+        
+        try:
+            #validate required fields
+            if not day or not meal_type:
+                return Response(
+                    {"error": "Both day and meal_type are required."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+            )
+
+            #validate requested day
+            if day not in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']:
+                return Response(
+                    {"error": "Invalid day."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            #validate requested meal type
+            if meal_type not in ['lunch', 'dinner']:
+                return Response(
+                    {"error": "Invalid meal type."}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            template_menu = TemplateMenu.objects.get(day=day, meal_type=meal_type)
+            serializer = TemplateMenuSerializer(template_menu, context={'request': request})
+            return Response(serializer.data)
+        except TemplateMenu.DoesNotExist:
+            return Response(
+                {"error": "Template menu not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"An unexpected error occurred: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            ) 
 
     def post(self, request):
-        print(request.data)
         serializer = CreateTemplateMenuSerializer(data=request.data)
-        print(serializer.is_valid())
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
