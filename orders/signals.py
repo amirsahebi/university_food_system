@@ -15,14 +15,29 @@ def handle_reservation_status_change(sender, instance, **kwargs):
     """
     Signal to handle reservation status changes:
     - Send notification when reservation status changes from 'preparing' to 'ready_to_pickup'
-    - Update capacity when status changes to 'waiting'
+    - Update capacity when status changes to 'waiting' or when a new reservation is created with 'waiting' status
     - Restore capacity when status changes to 'cancelled'
     """
-    # First check if this is an existing reservation (not a new one)
-    if instance.pk:
-        try:
-            with transaction.atomic():
-                # Get the old instance to compare status
+    try:
+        with transaction.atomic():
+            # Handle new reservation creation with waiting status
+            if not instance.pk and instance.status == 'waiting':
+                # Update capacity
+                instance.time_slot.capacity -= 1
+                instance.time_slot.save()
+                
+                # Update daily menu item capacity
+                daily_menu_item = instance.time_slot.daily_menu_item
+                daily_menu_item.daily_capacity -= 1
+                
+                # If capacity reaches zero, mark as unavailable
+                if daily_menu_item.daily_capacity <= 0:
+                    daily_menu_item.is_available = False
+                daily_menu_item.save()
+            
+            # Get the old instance if it exists
+            old_instance = None
+            if instance.pk:
                 old_instance = Reservation.objects.get(pk=instance.pk)
                 
                 # Handle waiting status change
@@ -62,11 +77,11 @@ def handle_reservation_status_change(sender, instance, **kwargs):
                     # Send notification to the student
                     send_ready_pickup_notification(instance)
                     
-        except Reservation.DoesNotExist:
-            pass  # This is a new reservation, no status change
-        except Exception as e:
-            logger.error(f"Error handling reservation status change: {str(e)}")
-            raise  # Re-raise the exception to trigger transaction rollback
+    except Reservation.DoesNotExist:
+        pass  # This is a new reservation, no status change
+    except Exception as e:
+        logger.error(f"Error handling reservation status change: {str(e)}")
+        raise  # Re-raise the exception to trigger transaction rollback
 
 def send_ready_pickup_notification(reservation):
     """
