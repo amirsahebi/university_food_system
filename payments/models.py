@@ -13,8 +13,8 @@ class Payment(models.Model):
         ('failed', 'Failed'),
     ]
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="payments")
-    reservation = models.ForeignKey(Reservation, on_delete=models.CASCADE, related_name="payments")
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
+    reservation = models.ForeignKey(Reservation, on_delete=models.SET_NULL, null=True, blank=True, related_name="payments")
     amount = models.PositiveIntegerField()  # Amount in Rial (IRR)
     authority = models.CharField(max_length=255, blank=True, null=True)  # Authority Code from ZarinPal
     ref_id = models.CharField(max_length=255, blank=True, null=True)  # Reference ID after success

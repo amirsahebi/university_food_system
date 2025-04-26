@@ -16,9 +16,9 @@ class Reservation(models.Model):
         ('picked_up', 'Picked Up'),
     ]
 
-    student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reservations')
-    food = models.ForeignKey(Food, on_delete=models.CASCADE)
-    time_slot = models.ForeignKey(TimeSlot, on_delete=models.CASCADE)
+    student = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reservations')
+    food = models.ForeignKey(Food, on_delete=models.SET_NULL, null=True, blank=True)
+    time_slot = models.ForeignKey(TimeSlot, on_delete=models.SET_NULL, null=True, blank=True)
     meal_type = models.CharField(max_length=10, choices=[('lunch', 'Lunch'), ('dinner', 'Dinner')])
     reserved_date = models.DateField()
     has_voucher = models.BooleanField(default=False)
