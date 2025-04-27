@@ -68,10 +68,13 @@ class Reservation(models.Model):
         # Calculate price if not already set
         if not self.price:
             self.price = self.calculate_price()
+            
+        # Check if this is a new reservation (created_at is None)
+        is_new = self._state.adding
         
-            # If price is zero and voucher is applied, set status to waiting
-            if self.price == 0 and self.has_voucher:
-                self.status = 'waiting'
+        # If it's a new reservation and price is zero and voucher is applied, set status to waiting
+        if is_new and self.price == 0 and self.has_voucher:
+            self.status = 'waiting'
         
         # Assign reservation number if not already assigned
         if not self.reservation_number:
