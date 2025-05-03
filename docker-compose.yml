@@ -85,7 +85,7 @@ services:
   celery:
     build: .
     container_name: university_food_system-celery
-    command: celery -A university_food_system worker -l info
+    command: celery -A university_food_system worker -B -l info
     volumes:
       - .:/app
       - ./logs:/app/logs

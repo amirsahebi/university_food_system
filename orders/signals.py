@@ -15,13 +15,13 @@ def handle_reservation_status_change(sender, instance, **kwargs):
     """
     Signal to handle reservation status changes:
     - Send notification when reservation status changes from 'preparing' to 'ready_to_pickup'
-    - Update capacity when status changes to 'waiting' or when a new reservation is created with 'waiting' status
+    - Update capacity when a new reservation is created
     - Restore capacity when status changes to 'cancelled'
     """
     try:
         with transaction.atomic():
-            # Handle new reservation creation with waiting status
-            if not instance.pk and instance.status == 'waiting':
+            # Handle new reservation creation
+            if not instance.pk:
                 # Update capacity
                 instance.time_slot.capacity -= 1
                 instance.time_slot.save()
@@ -40,23 +40,8 @@ def handle_reservation_status_change(sender, instance, **kwargs):
             if instance.pk:
                 old_instance = Reservation.objects.get(pk=instance.pk)
                 
-                # Handle waiting status change
-                if old_instance.status != 'waiting' and instance.status == 'waiting':
-                    # Update capacity
-                    instance.time_slot.capacity -= 1
-                    instance.time_slot.save()
-                    
-                    # Update daily menu item capacity
-                    daily_menu_item = instance.time_slot.daily_menu_item
-                    daily_menu_item.daily_capacity -= 1
-                    
-                    # If capacity reaches zero, mark as unavailable
-                    if daily_menu_item.daily_capacity <= 0:
-                        daily_menu_item.is_available = False
-                    daily_menu_item.save()
-                    
                 # Handle cancelled status change
-                elif old_instance.status == 'waiting' and instance.status == 'cancelled':
+                if old_instance.status == 'pending_payment' and instance.status == 'cancelled':
                     # Restore capacity
                     instance.time_slot.capacity += 1
                     instance.time_slot.save()

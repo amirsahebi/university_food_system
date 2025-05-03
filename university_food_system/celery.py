@@ -12,8 +12,8 @@ app = Celery('university_food_system')
 # the configuration object to child processes.
 app.config_from_object('django.conf:settings', namespace='CELERY')
 
-# Automatically discover tasks from all installed apps.
-app.autodiscover_tasks()
+# Explicitly specify which packages to scan for tasks
+app.autodiscover_tasks(['university_food_system.tasks'])
 
 @app.task(bind=True)
 def debug_task(self):
