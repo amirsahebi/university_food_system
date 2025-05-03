@@ -27,7 +27,18 @@ class SendOTPView(APIView):
         if not SMSService.validate_phone_number(phone_number):
             return Response({"error": "Invalid phone number format"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Rate limit: Check cache
+        # System-wide rate limiting (by IP address)
+        ip_address = self.get_client_ip(request)
+        system_cache_key = f"system_otp_limit:{ip_address}"
+        system_attempts = cache.get(system_cache_key) or 0
+        
+        if system_attempts >= 5:  # Limit to 5 attempts per IP within the window
+            return Response(
+                {"error": "Too many requests from your system. Please try again later."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
+
+        # Phone number specific rate limit
         cache_key = f"otp_limit:{phone_number}"
         attempts = cache.get(cache_key)
         if attempts:
@@ -54,8 +65,20 @@ class SendOTPView(APIView):
 
         # **Set cache to enforce rate limit (5 min = 300 seconds)**
         cache.set(cache_key, 1, timeout=300)
+        
+        # Increment the system-wide counter for this IP
+        cache.set(system_cache_key, system_attempts + 1, timeout=3600)  # 1 hour timeout for IP-based limiting
 
         return Response({"message": "OTP sent successfully"})
+
+    def get_client_ip(self, request):
+        """Get client IP address from request, accounting for proxies."""
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(',')[0]
+        else:
+            ip = request.META.get('REMOTE_ADDR')
+        return ip
 
 
 class VerifyOTPView(APIView):
