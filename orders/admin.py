@@ -3,6 +3,7 @@ from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 from .models import Reservation
 from menu.models import TimeSlot
+from django.db import transaction
 
 @admin.register(Reservation)
 class ReservationAdmin(admin.ModelAdmin):
@@ -83,3 +84,12 @@ class ReservationAdmin(admin.ModelAdmin):
             'food',
             'time_slot'
         )
+
+    def delete_queryset(self, request, queryset):
+        """Delete payments associated with reservations first, then delete the reservations."""
+        with transaction.atomic():
+            # Delete all related payments first
+            for reservation in queryset:
+                reservation.payments.all().delete()
+            # Then delete the reservations
+            queryset.delete()
