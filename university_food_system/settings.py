@@ -217,10 +217,6 @@ CELERY_TIMEZONE = TIME_ZONE
 
 # Celery Beat Schedule
 CELERY_BEAT_SCHEDULE = {
-    'cleanup-expired-reservations': {
-        'task': 'university_food_system.tasks.background_tasks.cleanup_expired_reservations',
-        'schedule': timedelta(hours=1),
-    },
     'cancel-pending-payment-reservations': {
         'task': 'university_food_system.tasks.background_tasks.cancel_pending_payment_reservations',
         'schedule': timedelta(minutes=1),
