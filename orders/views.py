@@ -206,21 +206,19 @@ class ReadyToPickupOrdersView(APIView):
 class NotPickedUpOrdersView(APIView):
     permission_classes = [IsAuthenticated, IsReceiverOrAdmin]
 
-    def get(self, request):
-        """Retrieve all not-picked-up orders for a specific date and meal type."""
-        reserved_date = request.query_params.get('reserved_date')
-        meal_type = request.query_params.get('meal_type')
+    def patch(self, request, id):
+        """Mark an order as not picked up."""
+        try:
+            order = Reservation.objects.get(id=id)
+        except Reservation.DoesNotExist:
+            return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not reserved_date or not meal_type:
-            return Response(
-                {"error": "Both date and meal_type are required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if order.status != 'ready_to_pickup':
+            return Response({"error": "Order is not ready for pickup"}, status=status.HTTP_400_BAD_REQUEST)
 
-        orders = Reservation.objects.filter(
-            Q(status='not_picked_up') & Q(reserved_date=reserved_date) & Q(meal_type=meal_type)
-        )
-        serializer = ReservationSerializer(orders, many=True)
+        order.status = 'not_picked_up'
+        order.save()
+        serializer = ReservationSerializer(order)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
