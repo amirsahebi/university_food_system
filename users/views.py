@@ -29,7 +29,8 @@ class SendOTPView(APIView):
 
         # Rate limit: Check cache
         cache_key = f"otp_limit:{phone_number}"
-        if cache.get(cache_key):
+        attempts = cache.get(cache_key)
+        if attempts:
             return Response(
                 {"error": "Too many requests. Please wait before requesting another OTP."},
                 status=status.HTTP_429_TOO_MANY_REQUESTS
@@ -52,7 +53,7 @@ class SendOTPView(APIView):
             )
 
         # **Set cache to enforce rate limit (5 min = 300 seconds)**
-        cache.set(cache_key, True, timeout=300)
+        cache.set(cache_key, 1, timeout=300)
 
         return Response({"message": "OTP sent successfully"})
 
@@ -183,7 +184,8 @@ class RequestPasswordResetView(APIView):
 
         # **Rate limit: Allow request only once every 5 minutes**
         cache_key = f"reset_password_limit:{phone_number}"
-        if cache.get(cache_key):
+        attempts = cache.get(cache_key)
+        if attempts:
             return Response({"error": "Too many requests. Please wait before requesting another OTP."},
                             status=status.HTTP_429_TOO_MANY_REQUESTS)
 
@@ -201,7 +203,7 @@ class RequestPasswordResetView(APIView):
             )
 
         # Set cache to enforce rate limit (5 min = 300 seconds)
-        cache.set(cache_key, True, timeout=300)
+        cache.set(cache_key, 1, timeout=300)
 
         return Response({"message": "Password reset OTP sent successfully"})
 
