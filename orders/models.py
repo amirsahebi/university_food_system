@@ -14,6 +14,7 @@ class Reservation(models.Model):
         ('preparing', 'Preparing'),
         ('ready_to_pickup', 'Ready to Pickup'),
         ('picked_up', 'Picked Up'),
+        ('not_picked_up', 'Not Picked Up'),
     ]
 
     student = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='reservations')

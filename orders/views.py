@@ -203,6 +203,27 @@ class ReadyToPickupOrdersView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class NotPickedUpOrdersView(APIView):
+    permission_classes = [IsAuthenticated, IsReceiverOrAdmin]
+
+    def get(self, request):
+        """Retrieve all not-picked-up orders for a specific date and meal type."""
+        reserved_date = request.query_params.get('reserved_date')
+        meal_type = request.query_params.get('meal_type')
+
+        if not reserved_date or not meal_type:
+            return Response(
+                {"error": "Both date and meal_type are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        orders = Reservation.objects.filter(
+            Q(status='not_picked_up') & Q(reserved_date=reserved_date) & Q(meal_type=meal_type)
+        )
+        serializer = ReservationSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class CancelReservationView(APIView):
     permission_classes = [IsAuthenticated, IsStudentOrAdmin]
 

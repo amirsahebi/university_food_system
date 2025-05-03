@@ -9,6 +9,7 @@ from .views import (
     RetrieveReservationByDeliveryCodeView,
     PickedUpOrdersView,
     ReadyToPickupOrdersView,
+    NotPickedUpOrdersView,
     CancelReservationView
 )
 
@@ -22,5 +23,6 @@ urlpatterns = [
     path('delivery-code/', RetrieveReservationByDeliveryCodeView.as_view(), name='retrieve_by_delivery_code'),
     path('picked-up/', PickedUpOrdersView.as_view(), name='picked_up_orders'),
     path('ready-to-pickup/', ReadyToPickupOrdersView.as_view(), name='ready_to_pickup_orders'),
+    path('not-picked-up/', NotPickedUpOrdersView.as_view(), name='not_picked_up_orders'),
     path('<int:id>/cancel/', CancelReservationView.as_view(), name='cancel_order'),
 ]
