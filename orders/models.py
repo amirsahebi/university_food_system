@@ -25,7 +25,7 @@ class Reservation(models.Model):
     has_voucher = models.BooleanField(default=False)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending_payment')
-    delivery_code = models.CharField(max_length=6, blank=True, null=True, unique=True)
+    delivery_code = models.CharField(max_length=6, blank=True, null=True)
     reservation_number = models.PositiveIntegerField(blank=True, null=True, help_text="Sequential number for each meal and day")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(null=True, blank=True)
