@@ -54,3 +54,22 @@ class IsReceiverOrAdmin(BasePermission):
 
     def has_permission(self, request, view):
         return request.user.is_authenticated and request.user.role in ['receiver', 'admin']
+
+class HasValidTrustScoreForVoucher(BasePermission):
+    """
+    Allows access only if user has a valid trust score for using vouchers.
+    Users with negative trust scores cannot use vouchers.
+    """
+    message = "Cannot use vouchers with a negative trust score. Please contact support for assistance."
+    
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+            
+        # Check if this is a request that involves voucher usage
+        has_voucher = request.data.get('has_voucher', False)
+        if not has_voucher:
+            return True  # No voucher being used, so permission is granted
+            
+        # User must have a non-negative trust score to use vouchers
+        return request.user.trust_score >= 0

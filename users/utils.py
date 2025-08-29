@@ -3,6 +3,33 @@ import requests
 import json
 import logging
 from django.conf import settings
+import requests
+import json
+from django.utils import timezone
+from .models import User
+from django.db.models import F
+
+def recover_trust_scores_daily():
+    """
+    Recover trust scores for all users with negative scores.
+    This function should be called by a scheduled task (e.g., cron job) daily.
+    It will increase negative trust scores by 2 points daily until they reach 0.
+    """
+    # Get all users with negative trust scores
+    users_to_recover = User.objects.filter(trust_score__lt=0)
+    
+    recovered_count = 0
+    
+    for user in users_to_recover:
+        if user.recover_trust_score_daily():
+            recovered_count += 1
+    
+    return {
+        'status': 'success',
+        'users_processed': len(users_to_recover),
+        'users_recovered': recovered_count,
+        'timestamp': timezone.now().isoformat()
+    }
 
 logger = logging.getLogger(__name__)
 

@@ -59,3 +59,4 @@ def cancel_pending_payment_reservations():
             )
     
     logger.info(f"Successfully cancelled {total_expired} reservations")
+    return f"{total_expired} pending payment reservations cancelled."

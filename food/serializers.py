@@ -18,10 +18,20 @@ class FoodSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True
     )
+    # Explicitly define the field to ensure proper handling
+    supports_extra_voucher = serializers.BooleanField(
+        required=False,
+        allow_null=True,
+        default=False,  # Set a default value if needed
+    )
     
     class Meta:
         model = Food
-        fields = ['id', 'name', 'description', 'price', 'image', 'image_url', 'category_id', 'category_name', 'created_at', 'updated_at']
+        fields = [
+            'id', 'name', 'description', 'price', 'image', 'image_url', 
+            'category_id', 'category_name', 'supports_extra_voucher',
+            'created_at', 'updated_at'
+        ]
         read_only_fields = ['created_at', 'updated_at']
 
     def get_image_url(self, obj):

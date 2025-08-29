@@ -39,6 +39,8 @@ class PaymentAdmin(admin.ModelAdmin):
 
     def reservation_link(self, obj):
         """Display a clickable link to the related reservation."""
+        if not obj.reservation:
+            return "-"
         return format_html(
             '<a href="{}">{}</a>',
             f"/admin/orders/reservation/{obj.reservation.id}/change/",

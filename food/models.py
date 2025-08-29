@@ -28,6 +28,10 @@ class Food(models.Model):
         null=True, 
         blank=True
     )
+    supports_extra_voucher = models.BooleanField(
+        default=False,
+        help_text='Whether this food item supports extra vouchers'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

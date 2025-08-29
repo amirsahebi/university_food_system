@@ -84,13 +84,16 @@ services:
 
   celery:
     build: .
-    container_name: university_food_system-celery
-    command: celery -A university_food_system worker -B -l info
+    container_name: university_food_system-celery-worker
+    command: celery -A university_food_system worker -l info --concurrency=4
     volumes:
       - .:/app
       - ./logs:/app/logs
     env_file:
       - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
@@ -98,6 +101,32 @@ services:
         condition: service_healthy
     networks:
       - app_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  celery-beat:
+    build: .
+    container_name: university_food_system-celery-beat
+    command: celery -A university_food_system beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+      - celery
+    networks:
+      - app_network
+    restart: unless-stopped
     logging:
       driver: "json-file"
       options:

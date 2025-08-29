@@ -64,3 +64,4 @@ wcwidth==0.2.13
 whitenoise==6.6.0
 SQLAlchemy==2.0.25  # For advanced database operations
 psycopg2-binary==2.9.9
+freezegun==1.2.2

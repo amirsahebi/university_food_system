@@ -1,18 +1,121 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework import status, generics, permissions, viewsets
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from .models import User
+from .serializers import (
+    UserSerializer, CreateUserSerializer, LoginSerializer,
+    PasswordResetRequestSerializer, ResetPasswordSerializer,
+    UserProfileUpdateSerializer, StudentSerializer, StudentInputSerializer
+)
 from django.core.cache import cache
 from django.utils.timezone import now, timedelta
 from .models import User, OTP
-from .serializers import UserSerializer,UserProfileUpdateSerializer
+from .serializers import UserSerializer, UserProfileUpdateSerializer
+from .utils import recover_trust_scores_daily
+from rest_framework.permissions import IsAdminUser
 import re
 from django.contrib.auth import authenticate
 from django.conf import settings
 import os
 from .utils import SMSService
+from rest_framework.permissions import BasePermission
+from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+
+class StudentListCreateAPIView(APIView):
+    permission_classes = [IsAdminUser]
+    
+    def get_queryset(self):
+        queryset = User.objects.filter(role='student').order_by('-date_joined')
+        search = self.request.query_params.get('search')
+        if search:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(student_number__icontains=search) |
+                Q(email__icontains=search)
+            )
+        return queryset
+    
+    def get(self, request, *args, **kwargs):
+        students = self.get_queryset()
+        serializer = StudentSerializer(students, many=True)
+        return Response(serializer.data)
+    
+    def post(self, request, *args, **kwargs):
+        serializer = StudentInputSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save(role='student')
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class StudentRetrieveUpdateDestroyAPIView(APIView):
+    permission_classes = [IsAdminUser]
+    
+    def get_object(self, pk):
+        return get_object_or_404(User, pk=pk, role='student')
+    
+    def get(self, request, pk, *args, **kwargs):
+        student = self.get_object(pk)
+        serializer = StudentSerializer(student)
+        return Response(serializer.data)
+    
+    def put(self, request, pk, *args, **kwargs):
+        student = self.get_object(pk)
+        serializer = StudentInputSerializer(student, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def patch(self, request, pk, *args, **kwargs):
+        student = self.get_object(pk)
+        serializer = StudentInputSerializer(student, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def delete(self, request, pk, *args, **kwargs):
+        student = self.get_object(pk)
+        student.is_active = False
+        student.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class TrustScoreView(APIView):
+    """
+    API endpoint that allows users to view their trust score and recovery status.
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        
+        response_data = {
+            'trust_score': user.trust_score,
+            'trust_score_updated_at': user.trust_score_updated_at,
+            'can_use_vouchers': user.trust_score >= 0,
+            'status': 'good' if user.trust_score >= 0 else 'recovery_in_progress'
+        }
+        
+        if user.trust_score < 0:
+            # Calculate estimated days to recover (ceiling division)
+            points_to_recover = abs(user.trust_score)
+            estimated_days = (points_to_recover + 1) // 2  # +1 for ceiling effect
+            
+            response_data['recovery_info'] = {
+                'points_to_recover': points_to_recover,
+                'estimated_days': estimated_days,
+                'recovery_rate': '2 points per day',
+                'message': 'Your trust score will recover automatically by 2 points each day.'
+            }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
 
 
 class SendOTPView(APIView):
@@ -319,15 +422,65 @@ class CheckStudentNumberView(APIView):
     """Check if a student number is registered in the system."""
     def post(self, request):
         student_number = request.data.get('student_number')
-
+        
         if not student_number:
-            return Response({"error": "Student number is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Ensure student number is numeric and has a valid length
-        if not student_number.isdigit() or len(student_number) < 5:
-            return Response({"error": "Invalid student number format"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Check if the student number exists
+            return Response(
+                {"error": "Student number is required"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
         exists = User.objects.filter(student_number=student_number).exists()
-
+        
         return Response({"exists": exists}, status=status.HTTP_200_OK)
+
+
+class AdminTrustScoreRecoveryView(APIView):
+    """
+    Admin endpoint to manually trigger trust score recovery.
+    This is meant for testing and admin purposes.
+    """
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    
+    def post(self, request):
+        # Expecting student identifier in request
+        student_id = request.data.get('student_id') or request.data.get('student_number')
+        if not student_id:
+            return Response(
+                {"error": "'student_id' is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Find the student by id
+        try:
+            student = User.objects.get(id=student_id)
+        except User.DoesNotExist:
+            return Response(
+                {"error": "Student not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Only adjust if trust_score is negative
+        if student.trust_score < 0:
+            previous_score = student.trust_score
+            student.trust_score = 0
+            student.trust_score_updated_at = now()
+            student.save(update_fields=["trust_score", "trust_score_updated_at"])
+            return Response(
+                {
+                    "message": "Trust score reset to zero",
+                    "student_id": student.id,
+                    "previous_trust_score": previous_score,
+                    "new_trust_score": student.trust_score,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # Nothing to change if score is already zero or positive
+        return Response(
+            {
+                "message": "No change needed; trust score is not negative",
+                "student_id": student.id,
+                "trust_score": student.trust_score,
+            },
+            status=status.HTTP_200_OK,
+        )

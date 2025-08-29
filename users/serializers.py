@@ -74,3 +74,60 @@ class UserProfileUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['first_name', 'last_name', 'student_number']
+
+
+class StudentInputSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(write_only=True)
+    
+    class Meta:
+        model = User
+        fields = [
+            'name', 'student_number', 'email', 'phone_number', 'is_active'
+        ]
+        extra_kwargs = {
+            'student_number': {'required': True},
+            'is_active': {'required': False, 'default': True}
+        }
+
+    def validate_name(self, value):
+        names = value.split()
+        if len(names) < 2:
+            raise serializers.ValidationError("Please provide both first and last name.")
+        return value
+
+    def create(self, validated_data):
+        name_parts = validated_data.pop('name').split()
+        validated_data['first_name'] = name_parts[0]
+        validated_data['last_name'] = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+        validated_data['username'] = validated_data.get('student_number')
+        validated_data['role'] = 'student'
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'name' in validated_data:
+            name_parts = validated_data.pop('name').split()
+            validated_data['first_name'] = name_parts[0]
+            validated_data['last_name'] = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+        return super().update(instance, validated_data)
+
+
+class StudentSerializer(serializers.ModelSerializer):
+    name = serializers.SerializerMethodField()
+    student_id = serializers.CharField(source='student_number')
+    phone = serializers.CharField(source='phone_number')
+    status = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField(source='date_joined')
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'name', 'student_id', 'email', 'phone', 'is_active',
+            'trust_score', 'status', 'created_at'
+        ]
+        read_only_fields = ['id', 'trust_score', 'created_at']
+
+    def get_name(self, obj):
+        return f"{obj.first_name} {obj.last_name}"
+
+    def get_status(self, obj):
+        return 'active' if obj.is_active else 'inactive'

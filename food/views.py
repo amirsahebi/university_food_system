@@ -19,6 +19,7 @@ class FoodListCreateView(APIView):
 
     def post(self, request):
         """Create a new food item"""
+        print(request.data)
         serializer = FoodSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
             try:

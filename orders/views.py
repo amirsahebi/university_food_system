@@ -8,8 +8,10 @@ from university_food_system.permissions import (
     IsStudentOrAdmin,
     IsChefOrReceiverOrAdmin,
     IsReceiverOrAdmin,
+    HasValidTrustScoreForVoucher,
 )
 from django.db.models import Q
+from django.db import transaction
 import pytz
 from datetime import datetime
 
@@ -50,24 +52,65 @@ class UpdateOrderStatusView(APIView):
 
 
 class PlaceOrderView(APIView):
-    permission_classes = [IsAuthenticated, IsStudentOrAdmin]
+    permission_classes = [IsAuthenticated, IsStudentOrAdmin, HasValidTrustScoreForVoucher]
 
     def post(self, request):
         """Place a new order."""
         serializer = CreateReservationSerializer(data=request.data, context={'request': request})
-        print(request.data)
-        if serializer.is_valid():
-            # Create the reservation (capacity updates will be handled by signals)
-            reservation = serializer.save(student=request.user)
+        
+        try:
+            if serializer.is_valid():
+                # Check extra voucher validation
+                food_id = request.data.get('food')
+                has_extra_voucher = request.data.get('has_extra_voucher', False)
+                
+                if has_extra_voucher and food_id:
+                    from food.models import Food
+                    try:
+                        food = Food.objects.get(id=food_id)
+                        if not food.supports_extra_voucher:
+                            return Response(
+                                {"error": "This food item does not support extra vouchers"},
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+                    except Food.DoesNotExist:
+                        return Response(
+                            {"error": "Food item not found"},
+                            status=status.HTTP_404_NOT_FOUND
+                        )
+                
+                # Create the reservation first
+                reservation = serializer.save(
+                    student=request.user,
+                    has_extra_voucher=has_extra_voucher
+                )
+                
+                # After successful reservation, cancel any other pending payments for the same user, date, and meal type
+                if reservation.status == 'waiting':  # Only if the reservation was successful
+                    Reservation.objects.filter(
+                        student=request.user,
+                        reserved_date=reservation.reserved_date,
+                        meal_type=reservation.meal_type,
+                        status='pending_payment',
+                        id__ne=reservation.id  # Exclude the current reservation
+                    ).update(status='cancelled')
+                
+                # Get the full reservation data for response
+                response_data = ReservationSerializer(reservation).data
+                
+                # Include trust score information in the response
+                response_data['trust_score'] = request.user.trust_score
+                response_data['trust_score_impact'] = reservation.trust_score_impact
+                
+                return Response(response_data, status=status.HTTP_201_CREATED)
+                
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
             
-            # The delivery code will be automatically generated in the save method
-            # No need to call generate_delivery_code() explicitly
-            
-            # Get the full reservation data for response
-            response_data = ReservationSerializer(reservation).data
-            
-            return Response(response_data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_406_NOT_ACCEPTABLE)
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 
 class PendingOrdersView(APIView):

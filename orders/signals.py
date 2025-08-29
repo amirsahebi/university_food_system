@@ -1,11 +1,12 @@
-from django.db.models.signals import pre_save
+from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 from django.utils import timezone
-from django.db import transaction
+from django.db import transaction, models
 from .models import Reservation
 from menu.models import DailyMenuItem
 from users.utils import SMSService
 import logging
+from django.db.models import F
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -50,8 +51,8 @@ def handle_reservation_status_change(sender, instance, **kwargs):
                     daily_menu_item = instance.time_slot.daily_menu_item
                     daily_menu_item.daily_capacity += 1
                     
-                    # If capacity was zero, make it available again
-                    if daily_menu_item.daily_capacity > 0:
+                    # If capacity was zero, mark as available again
+                    if daily_menu_item.daily_capacity > 0 and not daily_menu_item.is_available:
                         daily_menu_item.is_available = True
                     daily_menu_item.save()
                     
@@ -61,12 +62,29 @@ def handle_reservation_status_change(sender, instance, **kwargs):
                     instance.updated_at = timezone.now()
                     # Send notification to the student
                     send_ready_pickup_notification(instance)
+                
+                # Handle trust score updates for status changes
+                if old_instance.status != instance.status:
+                    update_trust_score(instance, old_instance.status)
                     
     except Reservation.DoesNotExist:
         pass  # This is a new reservation, no status change
     except Exception as e:
         logger.error(f"Error handling reservation status change: {str(e)}")
         raise  # Re-raise the exception to trigger transaction rollback
+
+def update_trust_score(reservation, old_status):
+    """
+    Update the user's trust score based on reservation status changes.
+    This is a signal handler that calls the model's update_trust_score method.
+    """
+    try:
+        # Call the model's update_trust_score method
+        reservation.update_trust_score()
+    except Exception as e:
+        logger.error(f"Error in signal handler for reservation {getattr(reservation, 'id', 'new')}: {str(e)}")
+        raise
+
 
 def send_ready_pickup_notification(reservation):
     """

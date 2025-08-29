@@ -19,6 +19,7 @@ from sentry_sdk.integrations.django import DjangoIntegration
 from sentry_sdk.integrations.celery import CeleryIntegration
 import warnings
 from datetime import timedelta
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -35,6 +36,8 @@ for key, value in os.environ.items():
 ZARINPAL_MERCHANT_ID = os.environ.get('ZARINPAL_MERCHANT_ID', 'placeholder_merchant_id')
 ZARINPAL_REQUEST_URL = os.environ.get('ZARINPAL_REQUEST_URL', 'https://sandbox.zarinpal.com/pg/v4/payment/request.json')
 ZARINPAL_VERIFY_URL = os.environ.get('ZARINPAL_VERIFY_URL', 'https://sandbox.zarinpal.com/pg/v4/payment/verify.json')
+ZARINPAL_INQUIRY_URL = os.environ.get('ZARINPAL_INQUIRY_URL', 'https://sandbox.zarinpal.com/pg/v4/payment/inquiry.json')
+ZARINPAL_REVERSE_URL = os.environ.get('ZARINPAL_REVERSE_URL', 'https://sandbox.zarinpal.com/pg/v4/payment/reverse.json')
 ZARINPAL_STARTPAY_URL = os.environ.get('ZARINPAL_STARTPAY_URL', 'https://sandbox.zarinpal.com/pg/StartPay/')
 
 if ZARINPAL_MERCHANT_ID == 'placeholder_merchant_id':
@@ -49,6 +52,20 @@ SMS_TEMPLATE_ID = os.environ.get('SMS_TEMPLATE_ID', '123456')
 # Validate SMS configuration
 if not SMS_API_KEY:
     warnings.warn("SMS_API_KEY is not set. SMS functionality will not work.", RuntimeWarning)
+
+# Celery Configuration
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'Asia/Tehran'
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+CELERY_BEAT_SYNC_EVERY = 1  # Synchronize the schedule every second
+
+# Trust Score Recovery Settings
+TRUST_SCORE_RECOVERY_RATE = 2  # Points to recover per day
+TRUST_SCORE_RECOVERY_INTERVAL = 86400  # 24 hours in seconds
 
 print(f"Loaded SMS_API_URL: {SMS_API_URL}")  # Debug print
 
@@ -76,6 +93,7 @@ INSTALLED_APPS = [
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt.token_blacklist',
+    'django_celery_beat',
 
     # Custom apps
     'users',
@@ -85,8 +103,6 @@ INSTALLED_APPS = [
     'orders',
     'reports',
     'payments',
-
-    'django_celery_beat',
     'whitenoise',
 ]
 
@@ -185,7 +201,7 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = os.environ.get('DJANGO_STATIC_URL', '/static/')
-STATIC_ROOT = os.environ.get('DJANGO_STATIC_ROOT', os.path.join(BASE_DIR, 'staticfiles'))
+STATIC_ROOT = os.environ.get('DJANGO_STATIC_ROOT', os.path.join(BASE_DIR, 'app/staticfiles'))
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'university_food_system', 'static'),
 ]
@@ -195,7 +211,7 @@ WHITENOISE_MANIFEST_STRICT = False
 
 # Media files configuration
 MEDIA_URL = os.environ.get('DJANGO_MEDIA_URL', '/media/')
-MEDIA_ROOT = os.environ.get('DJANGO_MEDIA_ROOT', BASE_DIR / 'media')
+MEDIA_ROOT = os.environ.get('DJANGO_MEDIA_ROOT', os.path.join(BASE_DIR, 'app/media'))
 
 # Custom file storage to handle permissions
 DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
@@ -207,21 +223,8 @@ SECURE_SSL_REDIRECT = False
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
 
-# Celery Configuration
-CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
-CELERY_ACCEPT_CONTENT = ['application/json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
-
-# Celery Beat Schedule
-CELERY_BEAT_SCHEDULE = {
-    'cancel-pending-payment-reservations': {
-        'task': 'university_food_system.tasks.background_tasks.cancel_pending_payment_reservations',
-        'schedule': timedelta(minutes=1),
-    },
-}
+# Celery Configuration - Moved to university_food_system/celery.py
+# All Celery settings and schedules are now managed in the celery.py file
 
 # Cache Configuration
 CACHES = {
