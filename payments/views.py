@@ -227,7 +227,7 @@ class PaymentHistoryView(APIView):
 
         paginator = Paginator(payments, limit)
         paginated_payments = paginator.get_page(offset)
-
+            
         return Response({
             "count": paginator.count,
             "results": PaymentSerializer(paginated_payments, many=True).data
@@ -292,30 +292,52 @@ class AdminPaymentView(APIView):
         return queryset
     
     def get(self, request):
-        """List all payments with optional filtering and pagination."""
-        page_size = request.query_params.get('page_size', 20)
-        page = request.query_params.get('page', 1)
+        """
+        List all payments with optional filtering and pagination.
         
-        queryset = self.get_queryset()
-        
-        # Apply ordering
-        ordering = request.query_params.get('ordering', self.ordering[0])
-        if ordering.lstrip('-') in self.ordering_fields:
-            queryset = queryset.order_by(ordering)
-        
-        # Paginate results
-        paginator = Paginator(queryset, page_size)
-        page_obj = paginator.get_page(page)
-        
-        serializer = self.serializer_class(page_obj, many=True)
-        
-        return Response({
-            'count': paginator.count,
-            'page': page_obj.number,
-            'page_size': int(page_size),
-            'total_pages': paginator.num_pages,
-            'results': serializer.data,
-        })
+        Query Parameters:
+        - limit (int): Number of results per page (default: 20, max: 100)
+        - offset (int): Number of items to skip (default: 0)
+        - status (str): Filter by payment status (optional)
+        - user_id (int): Filter by user ID (optional)
+        - min_amount (int): Filter by minimum amount (optional)
+        - max_amount (int): Filter by maximum amount (optional)
+        - start_date (date): Filter by start date (YYYY-MM-DD) (optional)
+        - end_date (date): Filter by end date (YYYY-MM-DD) (optional)
+        - search (str): Search in authority, ref_id, or user phone number (optional)
+        - ordering (str): Field to order by, prefix with - for descending (default: -created_at)
+        """
+        try:
+            # Parse and validate pagination parameters
+            limit = min(int(request.query_params.get('limit', 20)), 100)  # Max 100 items per page
+            offset = max(0, int(request.query_params.get('offset', 0)))
+            
+            # Get filtered and ordered queryset
+            queryset = self.get_queryset()
+            
+            # Get total count before pagination
+            total_count = queryset.count()
+            
+            # Apply pagination
+            paginated_payments = queryset[offset:offset + limit]
+            
+            # Serialize the results
+            serializer = self.serializer_class(paginated_payments, many=True)
+            
+            return Response({
+                'count': total_count,
+                'next': offset + limit < total_count,
+                'previous': offset > 0,
+                'offset': offset,
+                'limit': limit,
+                'results': serializer.data
+            })
+            
+        except (ValueError, TypeError) as e:
+            return Response(
+                {"error": "Invalid parameters. 'limit' and 'offset' must be integers, and dates must be in YYYY-MM-DD format."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
     def retrieve(self, request, pk=None):
         """Retrieve a specific payment with detailed information."""
