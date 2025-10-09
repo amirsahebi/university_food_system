@@ -92,8 +92,7 @@ class PlaceOrderView(APIView):
                         reserved_date=reservation.reserved_date,
                         meal_type=reservation.meal_type,
                         status='pending_payment',
-                        id__ne=reservation.id  # Exclude the current reservation
-                    ).update(status='cancelled')
+                    ).exclude(id=reservation.id).update(status='cancelled')  # Exclude the current reservation
                 
                 # Get the full reservation data for response
                 response_data = ReservationSerializer(reservation).data
