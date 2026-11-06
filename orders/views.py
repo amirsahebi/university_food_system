@@ -26,7 +26,7 @@ class ReceiverOrdersView(APIView):
         if not reserved_date or not meal_type:
             return Response({"error": "Both date and meal_type are required."}, status=status.HTTP_400_BAD_REQUEST)
         
-        orders = Reservation.objects.filter(Q(reserved_date=reserved_date) & Q(meal_type=meal_type))
+        orders = Reservation.objects.select_related('student', 'food', 'time_slot', 'voucher_type').filter(Q(reserved_date=reserved_date) & Q(meal_type=meal_type))
         serializer = ReservationSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -117,7 +117,7 @@ class PendingOrdersView(APIView):
 
     def get(self, request):
         """Retrieve all pending orders."""
-        orders = Reservation.objects.filter(status='waiting')
+        orders = Reservation.objects.select_related('student', 'food', 'time_slot', 'voucher_type').filter(status='waiting')
         serializer = ReservationSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -146,7 +146,7 @@ class StudentOrdersView(APIView):
 
     def get(self, request):
         """Retrieve all orders for the current student."""
-        orders = Reservation.objects.filter(student=request.user)
+        orders = Reservation.objects.select_related('student', 'food', 'time_slot', 'voucher_type').filter(student=request.user)
         serializer = ReservationSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -190,8 +190,8 @@ class RetrieveReservationByDeliveryCodeView(APIView):
             
         
         try:
-            # Build query with all required filters
-            reservation = Reservation.objects.get(
+            # Build query with all required filters and eager loading
+            reservation = Reservation.objects.select_related('student', 'food', 'time_slot', 'voucher_type').get(
                 delivery_code=delivery_code,
                 meal_type=meal_type,
                 reserved_date=parsed_date
@@ -216,7 +216,7 @@ class PickedUpOrdersView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        orders = Reservation.objects.filter(
+        orders = Reservation.objects.select_related('student', 'food', 'time_slot', 'voucher_type').filter(
             Q(status='picked_up') & Q(reserved_date=reserved_date) & Q(meal_type=meal_type)
         )
         serializer = ReservationSerializer(orders, many=True)
@@ -237,10 +237,9 @@ class ReadyToPickupOrdersView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        orders = Reservation.objects.filter(
+        orders = Reservation.objects.select_related('student', 'food', 'time_slot', 'voucher_type').filter(
             Q(status='ready_to_pickup') & Q(reserved_date=reserved_date) & Q(meal_type=meal_type)
         )
-        print(orders)
         serializer = ReservationSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 

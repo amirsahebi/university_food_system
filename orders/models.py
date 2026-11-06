@@ -26,6 +26,20 @@ class Reservation(models.Model):
     time_slot = models.ForeignKey(TimeSlot, on_delete=models.SET_NULL, null=True, blank=True)
     meal_type = models.CharField(max_length=10, choices=[('lunch', 'Lunch'), ('dinner', 'Dinner')])
     reserved_date = models.DateField()
+    voucher_type = models.ForeignKey(
+        'core.VoucherType',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reservations',
+        help_text='The specific voucher type used for this reservation'
+    )
+    voucher_discount_applied = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0.0,
+        help_text='Snapshot of voucher discount applied at the time of reservation'
+    )
     has_voucher = models.BooleanField(default=False)
     has_extra_voucher = models.BooleanField(
         default=False,
@@ -87,16 +101,22 @@ class Reservation(models.Model):
             
         price = float(self.food.price)
         self.original_price = price
-        
-        # Apply regular voucher if applicable
-        if self.has_voucher:
-            price -= float(Voucher.get_voucher_price())
-            
-            # Apply extra voucher if applicable (same value as regular voucher)
+        discount = 0.0
+
+        # Priority 1: Multi-tier VoucherType
+        if self.voucher_type:
+            discount = float(self.voucher_type.discount_amount)
+            self.has_voucher = True
+        # Priority 2: Legacy boolean voucher
+        elif self.has_voucher:
+            voucher_price = float(Voucher.get_voucher_price())
+            discount += voucher_price
             if self.has_extra_voucher and self.food.supports_extra_voucher:
-                price -= float(Voucher.get_voucher_price())
-        
-        return max(price, 0)  # Ensure price doesn't go below zero
+                discount += voucher_price
+
+        self.voucher_discount_applied = discount
+        final_price = max(price - discount, 0)
+        return final_price
 
     def update_trust_score(self):
         """Update user's trust score based on reservation status."""
@@ -123,7 +143,7 @@ class Reservation(models.Model):
             self.student.trust_score_updated_at = timezone.now()
             self.student.save()
             
-        elif self.status == 'not_picked_up' and self.has_voucher:
+        elif self.status == 'not_picked_up' and (self.has_voucher or self.voucher_type):
             # Negative impact for not picking up with voucher
             penalty = -10
             
@@ -145,7 +165,7 @@ class Reservation(models.Model):
         is_new = self._state.adding
         
         # If it's a new reservation and price is zero and voucher is applied, set status to waiting
-        if is_new and self.price == 0 and self.has_voucher:
+        if is_new and self.price == 0 and (self.has_voucher or self.voucher_type):
             self.status = 'waiting'
             
         # Validate extra voucher usage
@@ -156,8 +176,13 @@ class Reservation(models.Model):
             raise ValueError("This food item does not support extra vouchers")
             
         # Check if user can use vouchers based on trust score
-        if self.student and self.student.trust_score < 0 and (self.has_voucher or self.has_extra_voucher):
+        if self.student and self.student.trust_score < 0 and (self.has_voucher or self.has_extra_voucher or self.voucher_type):
             raise ValueError("Cannot use vouchers with a negative trust score")
+
+        # Validate voucher eligibility for the selected food item
+        if self.voucher_type and hasattr(self, 'food') and self.food:
+            if not self.food.allowed_vouchers.filter(id=self.voucher_type.id).exists():
+                raise ValueError(f"Food '{self.food.name}' does not allow voucher type '{self.voucher_type.name}'")
         
         # Assign reservation number if not already assigned
         if not self.reservation_number:
@@ -172,6 +197,15 @@ class Reservation(models.Model):
         
         # Update trust score if status changed
         self.update_trust_score()
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['delivery_code', 'reserved_date', 'meal_type']),
+            models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['student', 'reserved_date', 'meal_type']),
+            models.Index(fields=['reserved_date', 'meal_type']),
+        ]
 
     def __str__(self):
         return f"{self.student.phone_number} - {self.food.name} ({self.status})"

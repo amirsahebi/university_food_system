@@ -27,11 +27,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables from .env file
 load_dotenv(os.path.join(BASE_DIR, '.env'), override=True)
 
-# Debug: Print all environment variables
-print("All environment variables:")
-for key, value in os.environ.items():
-    print(f"{key}: {value}")
-
 # Zarinpal Payment Gateway Configuration
 ZARINPAL_MERCHANT_ID = os.environ.get('ZARINPAL_MERCHANT_ID', 'placeholder_merchant_id')
 ZARINPAL_REQUEST_URL = os.environ.get('ZARINPAL_REQUEST_URL', 'https://sandbox.zarinpal.com/pg/v4/payment/request.json')

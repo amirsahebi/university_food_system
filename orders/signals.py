@@ -60,8 +60,10 @@ def handle_reservation_status_change(sender, instance, **kwargs):
                 elif old_instance.status == 'preparing' and instance.status == 'ready_to_pickup':
                     # Update the updated_at timestamp
                     instance.updated_at = timezone.now()
-                    # Send notification to the student
-                    send_ready_pickup_notification(instance)
+                    # Trigger async SMS notification safely on transaction commit
+                    from orders.tasks import send_pickup_notification_task
+                    res_id = instance.id
+                    transaction.on_commit(lambda: send_pickup_notification_task.delay(res_id))
                 
                 # Handle trust score updates for status changes
                 if old_instance.status != instance.status:

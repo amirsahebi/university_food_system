@@ -2,7 +2,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from .models import DailyMenuItem, TimeSlot
 
-@receiver(post_save, sender=DailyMenuItem)
+@receiver(pre_save, sender=DailyMenuItem)
 def update_daily_menu_item_availability(sender, instance, **kwargs):
     """Automatically update `is_available` for DailyMenuItem before saving."""
     if instance.daily_capacity == 0 or instance.time_slot_capacity == 0:
@@ -17,7 +17,7 @@ def update_time_slots_availability(sender, instance, **kwargs):
     instance.time_slots.update(is_available=instance.is_available)
 
 
-@receiver(post_save, sender=TimeSlot)
+@receiver(pre_save, sender=TimeSlot)
 def update_time_slot_availability(sender, instance, **kwargs):
     """Automatically update `is_available` for TimeSlot before saving."""
     instance.is_available = instance.capacity > 0

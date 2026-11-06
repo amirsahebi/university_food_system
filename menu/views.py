@@ -166,15 +166,16 @@ class DailyMenuView(APIView):
                     Prefetch(
                         'items',
                         queryset=DailyMenuItem.objects.select_related('food').prefetch_related(
+                            'food__allowed_vouchers',
                             Prefetch(
-                            'time_slots',
-                            queryset=TimeSlot.objects.all() if user.role == "admin"
-                            else TimeSlot.objects.filter(start_time__gt=current_iran_time)
+                                'time_slots',
+                                queryset=TimeSlot.objects.all() if user.role == "admin"
+                                else TimeSlot.objects.filter(start_time__gt=current_iran_time)
+                            )
                         )
                     )
-                )
                 ).get(
-                Q(date=date) & Q(meal_type=meal_type)
+                    Q(date=date) & Q(meal_type=meal_type)
                 )
             else:
                 # Optimize query with select_related and prefetch_related
@@ -182,15 +183,16 @@ class DailyMenuView(APIView):
                     Prefetch(
                         'items',
                         queryset=DailyMenuItem.objects.select_related('food').prefetch_related(
+                            'food__allowed_vouchers',
                             Prefetch(
-                            'time_slots',
-                            queryset=TimeSlot.objects.all()
+                                'time_slots',
+                                queryset=TimeSlot.objects.all()
+                            )
                         )
                     )
-                )
                 ).get(
-                Q(date=date) & Q(meal_type=meal_type)
-            )
+                    Q(date=date) & Q(meal_type=meal_type)
+                )
 
             # For admin users, return all data
             serializer = GetDailyMenuSerializer(daily_menu, context={'request': request})

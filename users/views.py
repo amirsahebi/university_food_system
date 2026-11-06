@@ -1,6 +1,6 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework import status, generics, permissions, viewsets
+from rest_framework import status, generics, permissions, viewsets, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
@@ -24,6 +24,22 @@ from .utils import SMSService
 from rest_framework.permissions import BasePermission
 from rest_framework_simplejwt.views import TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from django.core import signing
+
+
+class FlexibleTokenRefreshSerializer(TokenRefreshSerializer):
+    refresh = serializers.CharField(required=False)
+    refresh_token = serializers.CharField(required=False, write_only=True)
+
+    def validate(self, attrs):
+        token_val = attrs.get('refresh') or self.initial_data.get('refresh_token') or self.initial_data.get('refresh')
+        if not token_val:
+            raise serializers.ValidationError({"refresh": ["This field is required."]})
+        attrs['refresh'] = token_val
+        data = super().validate(attrs)
+        data['access_token'] = data['access']
+        return data
 
 
 class StudentListCreateAPIView(APIView):
@@ -82,8 +98,7 @@ class StudentRetrieveUpdateDestroyAPIView(APIView):
     
     def delete(self, request, pk, *args, **kwargs):
         student = self.get_object(pk)
-        student.is_active = False
-        student.save()
+        student.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -185,7 +200,7 @@ class SendOTPView(APIView):
 
 
 class VerifyOTPView(APIView):
-    """Verify the OTP sent to the user's phone."""
+    """Verify the OTP sent to the user's phone with brute-force defense."""
     def post(self, request):
         phone_number = request.data.get('phone_number')
         otp_code = request.data.get('code')
@@ -193,46 +208,96 @@ class VerifyOTPView(APIView):
         if not phone_number or not otp_code:
             return Response({"error": "Phone number and OTP are required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # Brute-force throttling: max 5 failed attempts per phone
+        cache_key = f"otp_attempts:{phone_number}"
+        attempts = cache.get(cache_key, 0)
+        if attempts >= 5:
+            OTP.objects.filter(phone_number=phone_number).delete()
+            return Response({
+                "error": "Too many failed attempts. Please request a new verification code."
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         try:
-            print(phone_number)
-            print(otp_code)
-            print(type(phone_number))
-            print(type(otp_code))
             otp_entry = OTP.objects.get(phone_number=phone_number, otp=otp_code)
-            print(otp_entry)
             if otp_entry.is_valid():
-                # # Delete the OTP after successful verification
-                # otp_entry.delete()
-                return Response({"verified": True}, status=status.HTTP_200_OK)
-            return Response({"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST)
+                # Reset attempt counter
+                cache.delete(cache_key)
+                # Delete OTP to prevent replay attacks
+                otp_entry.delete()
+                
+                # Issue signed verification token valid for 10 minutes
+                verification_token = signing.dumps(
+                    {"phone_number": phone_number, "action": "signup"},
+                    salt="signup-verification"
+                )
+                return Response({
+                    "verified": True,
+                    "verification_token": verification_token
+                }, status=status.HTTP_200_OK)
+
+            return Response({"error": "OTP expired. Please request a new one."}, status=status.HTTP_400_BAD_REQUEST)
         except OTP.DoesNotExist:
-            return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
+            cache.set(cache_key, attempts + 1, timeout=300)
+            remaining = 5 - (attempts + 1)
+            return Response({
+                "error": f"Invalid verification code. {remaining} attempt(s) remaining."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 
 class SignUpView(APIView):
-    """Sign up a new student after OTP verification."""
+    """Sign up a new student after cryptographic OTP verification."""
     def post(self, request):
         phone_number = request.data.get('phone_number')
         first_name = request.data.get('first_name')
         last_name = request.data.get('last_name')
         student_number = request.data.get('student_number')
         password = request.data.get('password')
+        verification_token = request.data.get('verification_token')
 
-        # Ensure OTP verification exists
-        verified = OTP.objects.filter(
-            phone_number=phone_number, created_at__gte=now() - timedelta(minutes=5)
-        ).exists()
+        if not phone_number or not password or not first_name or not last_name:
+            return Response({"error": "All required fields must be provided."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not verified:
-            return Response({"error": "OTP verification required"}, status=status.HTTP_400_BAD_REQUEST)
+        # Enforce valid cryptographic verification token from VerifyOTPView
+        if not verification_token:
+            return Response({
+                "error": "Verification token required. Please verify your phone number via SMS first."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payload = signing.loads(verification_token, salt="signup-verification", max_age=600)
+            if payload.get("phone_number") != phone_number or payload.get("action") != "signup":
+                return Response({
+                    "error": "Verification token does not match this phone number."
+                }, status=status.HTTP_400_BAD_REQUEST)
+        except signing.SignatureExpired:
+            return Response({
+                "error": "Verification has expired. Please verify your phone number again."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({
+                "error": "Invalid verification token. Please verify your phone number via SMS first."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Check if user already exists
         if User.objects.filter(phone_number=phone_number).exists():
-            return Response({"error": "User already exists"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "User with this phone number already exists."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if student_number and User.objects.filter(student_number=student_number).exists():
+            return Response({"error": "Student number is already registered."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Create user
-        user = User.objects.create_user(phone_number=phone_number, first_name=first_name, last_name=last_name, password=password, student_number=student_number, role='student')
-        return Response({"message": "Student registered successfully", "phone_number": user.phone_number}, status=status.HTTP_201_CREATED)
+        user = User.objects.create_user(
+            phone_number=phone_number,
+            first_name=first_name,
+            last_name=last_name,
+            password=password,
+            student_number=student_number,
+            role='student'
+        )
+        return Response({
+            "message": "Student registered successfully",
+            "phone_number": user.phone_number
+        }, status=status.HTTP_201_CREATED)
 
 
 class SignInView(APIView):
@@ -278,8 +343,8 @@ class SignOutView(APIView):
 
 
 class RefreshTokenView(TokenRefreshView):
-    """Refresh JWT tokens."""
-    pass
+    """Refresh JWT tokens with backward and forward compatibility."""
+    serializer_class = FlexibleTokenRefreshSerializer
 
 
 class MeView(APIView):
@@ -335,7 +400,7 @@ class RequestPasswordResetView(APIView):
 
 
 class ResetPasswordView(APIView):
-    """Reset password using OTP."""
+    """Reset password using OTP with brute-force defense."""
     def post(self, request):
         phone_number = request.data.get('phone_number')
         otp_code = request.data.get('otp')
@@ -345,11 +410,20 @@ class ResetPasswordView(APIView):
             return Response({"error": "Phone number, OTP, and new password are required"},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        # Brute-force throttling on password reset attempts
+        cache_key = f"reset_attempts:{phone_number}"
+        attempts = cache.get(cache_key, 0)
+        if attempts >= 5:
+            OTP.objects.filter(phone_number=phone_number).delete()
+            return Response({
+                "error": "Too many failed attempts. Please request a new password reset code."
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+
         # Verify OTP
         try:
             otp_entry = OTP.objects.get(phone_number=phone_number, otp=otp_code)
             if otp_entry.is_valid():
-                # Reset password
+                cache.delete(cache_key)
                 try:
                     user = User.objects.get(phone_number=phone_number)
                     user.set_password(new_password)
@@ -363,7 +437,11 @@ class ResetPasswordView(APIView):
                     return Response({"error": "User not found"}, status=status.HTTP_404_NOT_FOUND)
             return Response({"error": "OTP expired"}, status=status.HTTP_400_BAD_REQUEST)
         except OTP.DoesNotExist:
-            return Response({"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST)
+            cache.set(cache_key, attempts + 1, timeout=300)
+            remaining = 5 - (attempts + 1)
+            return Response({
+                "error": f"Invalid verification code. {remaining} attempt(s) remaining."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
 class UserProfileUpdateView(APIView):
     permission_classes = [IsAuthenticated]

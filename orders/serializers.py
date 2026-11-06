@@ -1,13 +1,12 @@
 from rest_framework import serializers
+from django.db import transaction
 from .models import Reservation
 from users.models import User
 from food.models import Food
 from menu.serializers import TimeSlotSerializer
-
-from rest_framework import serializers
-from django.db import transaction
-from .models import Reservation
-from menu.models import TimeSlot
+from menu.models import TimeSlot, DailyMenuItem
+from core.models import VoucherType
+from core.serializers import VoucherTypeSerializer
 from datetime import datetime
 from django.utils import timezone
 import pytz
@@ -17,11 +16,16 @@ IRAN_TZ = pytz.timezone("Asia/Tehran")
 
 class CreateReservationSerializer(serializers.ModelSerializer):
     time_slot = serializers.PrimaryKeyRelatedField(queryset=TimeSlot.objects.all())
+    voucher_type = serializers.PrimaryKeyRelatedField(
+        queryset=VoucherType.objects.filter(is_active=True),
+        required=False,
+        allow_null=True
+    )
     has_extra_voucher = serializers.BooleanField(required=False, default=False)
 
     class Meta:
         model = Reservation
-        fields = ['food', 'time_slot', 'reserved_date', 'has_voucher', 'has_extra_voucher', 'meal_type']
+        fields = ['food', 'time_slot', 'reserved_date', 'voucher_type', 'has_voucher', 'has_extra_voucher', 'meal_type']
         
     def validate_has_extra_voucher(self, value):
         """Validate that extra voucher can only be used with a regular voucher."""
@@ -39,13 +43,23 @@ class CreateReservationSerializer(serializers.ModelSerializer):
         user = self.context['request'].user
         has_voucher = data.get('has_voucher', False)
         has_extra_voucher = data.get('has_extra_voucher', False)
+        voucher_type = data.get('voucher_type')
         food = data.get('food')
 
         # Check trust score for voucher usage
-        if user.trust_score < 0 and has_voucher:
+        if user.trust_score < 0 and (has_voucher or voucher_type):
             raise serializers.ValidationError(
                 "Cannot use vouchers with a negative trust score"
             )
+
+        # Validate voucher_type eligibility
+        if voucher_type:
+            if not voucher_type.is_active:
+                raise serializers.ValidationError("The selected voucher type is inactive.")
+            if food and not food.allowed_vouchers.filter(id=voucher_type.id).exists():
+                raise serializers.ValidationError(
+                    {"voucher_type": f"'{food.name}' cannot be purchased with {voucher_type.name}."}
+                )
             
         # Check extra voucher validation
         if has_extra_voucher and food and not food.supports_extra_voucher:
@@ -57,42 +71,48 @@ class CreateReservationSerializer(serializers.ModelSerializer):
         if time_slot.capacity <= 0:
             raise serializers.ValidationError("The selected time slot is full. Please choose a different slot.")
 
-        # Ensure the end_time of the time slot hasn't passed
-        current_time = datetime.now().time()
-        if reserved_date == datetime.today().date() and time_slot.end_time <= current_time:
+        # Ensure the end_time of the time slot hasn't passed using Iran timezone
+        iran_now = timezone.now().astimezone(IRAN_TZ)
+        if reserved_date == iran_now.date() and time_slot.end_time <= iran_now.time():
             raise serializers.ValidationError("The selected time slot has already ended. Please choose a future time slot.")
 
-        # Prevent duplicate reservations for the same student, date, and meal type, except those in cancelled or pending_payment state
-        if Reservation.objects.filter(student=user, reserved_date=reserved_date, meal_type=meal_type).exclude(status__in=['cancelled', 'pending_payment']).exists():
+        # Prevent duplicate active reservations (including pending_payment) for the same student, date, and meal type
+        existing_reservation = Reservation.objects.filter(
+            student=user, 
+            reserved_date=reserved_date, 
+            meal_type=meal_type
+        ).exclude(status='cancelled').exists()
+        if existing_reservation:
             raise serializers.ValidationError(
-                "You already have a reservation for this date and meal type."
+                "You already have an active or pending reservation for this date and meal type."
             )
 
         return data
 
     def create(self, validated_data):
         """
-        Override create() to handle safe time slot capacity updates.
-        Also updates daily menu item capacity and availability status.
+        Override create() to handle safe time slot capacity updates with database locking.
         """
-        with transaction.atomic():  # Prevents race conditions
-            time_slot = validated_data['time_slot']
-            daily_menu_item = time_slot.daily_menu_item
+        with transaction.atomic():
+            user = self.context['request'].user
+            reserved_date = validated_data['reserved_date']
+            meal_type = validated_data['meal_type']
 
-            # Double-check time slot capacity inside the transaction
+            # Acquire row-level locks on TimeSlot and DailyMenuItem to prevent concurrency race conditions
+            time_slot = TimeSlot.objects.select_for_update().get(id=validated_data['time_slot'].id)
+            daily_menu_item = DailyMenuItem.objects.select_for_update().get(id=time_slot.daily_menu_item_id)
+            validated_data['time_slot'] = time_slot
+
+            # Double-check capacity under row-level lock
             if time_slot.capacity <= 0:
                 raise serializers.ValidationError("The selected time slot is full. Please choose a different slot.")
 
-            # Double-check daily menu item capacity inside the transaction
             if daily_menu_item.daily_capacity <= 0 or not daily_menu_item.is_available:
                 raise serializers.ValidationError("This menu item is no longer available. Please choose a different item.")
 
-            # Ensure the end_time hasn't passed again inside transaction
-            # Get current time in Iran timezone
+            # Ensure time slot has not expired
             iran_now = timezone.now().astimezone(IRAN_TZ)
-            current_iran_time = iran_now.time()
-            
-            if validated_data['reserved_date'] == datetime.today().date() and time_slot.start_time <= current_iran_time:
+            if reserved_date == iran_now.date() and time_slot.end_time <= iran_now.time():
                 raise serializers.ValidationError("The selected time slot has already ended. Please choose a future time slot.")
 
             return super().create(validated_data)
@@ -116,6 +136,8 @@ class ReservationSerializer(serializers.ModelSerializer):
     time_slot = TimeSlotSerializer()
     student = UserLessSerializer()
     food = FoodLessSerializer()
+    voucher_type = VoucherTypeSerializer(read_only=True)
+    voucher_discount_applied = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     trust_score = serializers.SerializerMethodField()
     trust_score_impact = serializers.IntegerField(read_only=True)
 
@@ -123,11 +145,12 @@ class ReservationSerializer(serializers.ModelSerializer):
         model = Reservation
         fields = [
             'id', 'student', 'food', 'time_slot', 'reserved_date', 'meal_type',
-            'has_voucher', 'has_extra_voucher', 'price', 'status', 'delivery_code',
+            'voucher_type', 'voucher_discount_applied', 'has_voucher', 'has_extra_voucher',
+            'price', 'original_price', 'status', 'delivery_code',
             'created_at', 'updated_at', 'trust_score', 'trust_score_impact',
             'reservation_number'
         ]
-        read_only_fields = ['price', 'delivery_code', 'reservation_number', 'status']
+        read_only_fields = ['price', 'original_price', 'delivery_code', 'reservation_number', 'status']
     
     def get_trust_score(self, obj):
         """Get the current trust score of the student."""

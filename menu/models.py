@@ -17,6 +17,11 @@ class TemplateMenu(models.Model):
     def __str__(self):
         return f"{self.day} - {self.meal_type}"
 
+    class Meta:
+        unique_together = ('day', 'meal_type')
+        verbose_name = "Template Menu"
+        verbose_name_plural = "Template Menus"
+
 
 class TemplateMenuItem(models.Model):
     template_menu = models.ForeignKey(TemplateMenu, on_delete=models.CASCADE, related_name="items")
@@ -37,6 +42,11 @@ class DailyMenu(models.Model):
 
     def __str__(self):
         return f"{self.date} - {self.meal_type}"
+
+    class Meta:
+        unique_together = ('date', 'meal_type')
+        verbose_name = "Daily Menu"
+        verbose_name_plural = "Daily Menus"
 
 
 class DailyMenuItem(models.Model):

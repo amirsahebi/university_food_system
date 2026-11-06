@@ -67,7 +67,7 @@ class HasValidTrustScoreForVoucher(BasePermission):
             return False
             
         # Check if this is a request that involves voucher usage
-        has_voucher = request.data.get('has_voucher', False)
+        has_voucher = request.data.get('has_voucher', False) or bool(request.data.get('voucher_type'))
         if not has_voucher:
             return True  # No voucher being used, so permission is granted
             
