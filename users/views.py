@@ -461,22 +461,34 @@ class ChangePasswordView(APIView):
 
     def post(self, request):
         user = request.user
-        current_password = request.data.get('currentPassword')
-        new_password = request.data.get('newPassword')
+        current_password = (
+            request.data.get('currentPassword') or 
+            request.data.get('old_password') or 
+            request.data.get('current_password')
+        )
+        new_password = (
+            request.data.get('newPassword') or 
+            request.data.get('new_password')
+        )
 
         if not current_password or not new_password:
-            print({"error": "Current password and new password are required"})
-            return Response({"error": "Current password and new password are required"},
+            msg = "رمز عبور فعلی و رمز عبور جدید الزامی است."
+            return Response({"error": msg, "message": msg},
                             status=status.HTTP_400_BAD_REQUEST)
 
         if not user.check_password(current_password):
-            print({"error": "Current password is incorrect"})
-            return Response({"error": "Current password is incorrect"},
+            msg = "رمز عبور فعلی نادرست است."
+            return Response({"error": msg, "message": msg},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if len(new_password) < 8:
+            msg = "رمز عبور جدید باید حداقل ۸ کاراکتر باشد."
+            return Response({"error": msg, "message": msg},
                             status=status.HTTP_400_BAD_REQUEST)
 
         user.set_password(new_password)
         user.save()
-        return Response({"message": "Password changed successfully"}, status=status.HTTP_200_OK)
+        return Response({"message": "رمز عبور با موفقیت تغییر یافت."}, status=status.HTTP_200_OK)
     
 
 class CheckPhoneNumberView(APIView):
