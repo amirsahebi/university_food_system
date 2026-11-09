@@ -273,9 +273,46 @@ class ToggleDailyMenuItemAvailabilityView(APIView):
         except DailyMenuItem.DoesNotExist:
             return Response({"error": "Daily menu item not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        daily_menu_item.is_available = not daily_menu_item.is_available
+        if "is_available" in request.data:
+            daily_menu_item.is_available = bool(request.data["is_available"])
+        else:
+            daily_menu_item.is_available = not daily_menu_item.is_available
         daily_menu_item.save()
         return Response({"message": "Availability toggled", "is_available": daily_menu_item.is_available}, status=status.HTTP_200_OK)
+
+
+class BatchToggleDailyMenuItemAvailabilityView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOnly]
+    """View for batch toggling the availability of all daily menu items for a meal/day."""
+
+    def put(self, request):
+        daily_menu_id = request.data.get('daily_menu_id')
+        is_available = request.data.get('is_available')
+        item_ids = request.data.get('item_ids')
+
+        if is_available is None:
+            return Response({"error": "is_available is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_avail_bool = bool(is_available)
+
+        if daily_menu_id:
+            items = DailyMenuItem.objects.filter(daily_menu_id=daily_menu_id)
+        elif item_ids:
+            items = DailyMenuItem.objects.filter(id__in=item_ids)
+        else:
+            return Response({"error": "daily_menu_id or item_ids required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_count = 0
+        for item in items:
+            item.is_available = is_avail_bool
+            item.save()
+            updated_count += 1
+
+        return Response({
+            "message": f"Successfully updated {updated_count} items",
+            "is_available": is_avail_bool,
+            "updated_count": updated_count
+        }, status=status.HTTP_200_OK)
 
 class UseTemplateForDailyView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOnly]

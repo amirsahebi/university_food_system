@@ -4,11 +4,9 @@ from .models import DailyMenuItem, TimeSlot
 
 @receiver(pre_save, sender=DailyMenuItem)
 def update_daily_menu_item_availability(sender, instance, **kwargs):
-    """Automatically update `is_available` for DailyMenuItem before saving."""
+    """Automatically update `is_available` for DailyMenuItem before saving if capacity is 0."""
     if instance.daily_capacity == 0 or instance.time_slot_capacity == 0:
         instance.is_available = False
-    else:
-        instance.is_available = True
 
 
 @receiver(post_save, sender=DailyMenuItem)
