@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from food.models import Food
@@ -136,29 +136,49 @@ class Reservation(models.Model):
             
         # Handle trust score updates based on status changes
         if self.status == 'picked_up':
-            # Positive impact for picking up food
-            points = int(self.price / 10000)  # +1 point per 10,000 tomans
-            self.trust_score_impact = points
-            self.student.trust_score += points
-            self.student.trust_score_updated_at = timezone.now()
-            self.student.save()
-            
+            # Award +1 trust score point per 100,000 Tomans of cumulative successful spending
+            paid_amount = int(self.price or 0)
+            if paid_amount > 0 and self.student_id:
+                with transaction.atomic():
+                    from users.models import User
+                    student = User.objects.select_for_update().get(id=self.student_id)
+                    student.total_spent = (student.total_spent or 0) + paid_amount
+                    total_points_deserved = student.total_spent // 100000
+                    already_awarded = student.loyalty_points_awarded or 0
+                    points_to_award = max(0, total_points_deserved - already_awarded)
+                    if points_to_award > 0:
+                        student.loyalty_points_awarded = already_awarded + points_to_award
+                        student.trust_score += points_to_award
+                        self.trust_score_impact = points_to_award
+                    else:
+                        self.trust_score_impact = 0
+                    student.trust_score_updated_at = timezone.now()
+                    student.save(update_fields=['total_spent', 'loyalty_points_awarded', 'trust_score', 'trust_score_updated_at'])
+                    self.student = student
+            else:
+                self.trust_score_impact = 0
+
         elif self.status == 'not_picked_up' and (self.has_voucher or self.voucher_type):
             # Negative impact for not picking up with voucher
             penalty = -10
-            
+
             # Additional penalty for extra voucher
             if self.has_extra_voucher:
                 penalty -= 10
-                
-            self.trust_score_impact = penalty
-            self.student.trust_score += penalty  # penalty is negative, so this decreases the score
-            self.student.trust_score_updated_at = timezone.now()
-            self.student.save()
+
+            if self.student_id:
+                with transaction.atomic():
+                    from users.models import User
+                    student = User.objects.select_for_update().get(id=self.student_id)
+                    self.trust_score_impact = penalty
+                    student.trust_score += penalty  # penalty is negative, decreases score
+                    student.trust_score_updated_at = timezone.now()
+                    student.save(update_fields=['trust_score', 'trust_score_updated_at'])
+                    self.student = student
     
     def save(self, *args, **kwargs):
         # Calculate price if not already set
-        if not self.price or not self.original_price:
+        if self.price is None or self.original_price is None:
             self.price = self.calculate_price()
             
         # Check if this is a new reservation (created_at is None)

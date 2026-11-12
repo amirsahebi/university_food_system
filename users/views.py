@@ -111,23 +111,29 @@ class TrustScoreView(APIView):
     def get(self, request):
         user = request.user
         
+        total_spent = getattr(user, 'total_spent', 0) or 0
+        loyalty_awarded = getattr(user, 'loyalty_points_awarded', 0) or 0
+        current_tier_progress = total_spent % 100000
+        amount_needed_for_next = 100000 - current_tier_progress if (total_spent > 0 or current_tier_progress > 0) else 100000
+
         response_data = {
             'trust_score': user.trust_score,
             'trust_score_updated_at': user.trust_score_updated_at,
             'can_use_vouchers': user.trust_score >= 0,
-            'status': 'good' if user.trust_score >= 0 else 'recovery_in_progress'
+            'status': 'good' if user.trust_score >= 0 else 'voucher_blocked',
+            'total_spent': total_spent,
+            'loyalty_points_awarded': loyalty_awarded,
+            'progress_to_next_point': current_tier_progress,
+            'amount_to_next_point': amount_needed_for_next,
         }
         
         if user.trust_score < 0:
-            # Calculate estimated days to recover (ceiling division)
             points_to_recover = abs(user.trust_score)
-            estimated_days = (points_to_recover + 1) // 2  # +1 for ceiling effect
-            
             response_data['recovery_info'] = {
                 'points_to_recover': points_to_recover,
-                'estimated_days': estimated_days,
-                'recovery_rate': '2 points per day',
-                'message': 'Your trust score will recover automatically by 2 points each day.'
+                'estimated_days': None,
+                'requires_admin_reset': True,
+                'message': 'امکان استفاده از ژتون به دلیل امتیاز منفی مسدود شده است. لطفاً جهت صفر کردن امتیاز به مدیریت سلف مراجعه فرمایید.'
             }
         
         return Response(response_data, status=status.HTTP_200_OK)

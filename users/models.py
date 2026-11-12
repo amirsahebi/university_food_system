@@ -42,6 +42,8 @@ class User(AbstractUser):
     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True)  # Add avatar field
     trust_score = models.IntegerField(default=10, help_text="User's trust score")
     trust_score_updated_at = models.DateTimeField(auto_now_add=True, help_text="When the trust score was last updated")
+    total_spent = models.BigIntegerField(default=0, help_text="Total cumulative spent amount in Tomans on completed orders")
+    loyalty_points_awarded = models.IntegerField(default=0, help_text="Total trust score points awarded from cumulative spending")
     is_deleted = models.BooleanField(default=False)
     deleted_at = models.DateTimeField(null=True, blank=True)
     REQUIRED_FIELDS = []
@@ -56,25 +58,9 @@ class User(AbstractUser):
 
     def recover_trust_score_daily(self, recovery_rate=2):
         """
-        Recover trust score by recovery_rate points per day for users with negative scores.
-        This should be called by a scheduled task (e.g., cron job) daily.
-        
-        Args:
-            recovery_rate: Number of points to recover (default: 2)
-            
-        Returns:
-            bool: True if the score was updated, False otherwise
+        Deprecated: Automatic daily recovery is disabled by design.
+        Negative trust scores remain negative until manually reset by an admin.
         """
-        if self.trust_score < 0:
-            # Increase score by recovery_rate points (but don't go above 0)
-            new_score = min(self.trust_score + recovery_rate, 0)
-            
-            # Only update if score changed
-            if new_score != self.trust_score:
-                self.trust_score = new_score
-                self.trust_score_updated_at = now()
-                self.save(update_fields=['trust_score', 'trust_score_updated_at'])
-                return True
         return False
 
     def save(self, *args, **kwargs):

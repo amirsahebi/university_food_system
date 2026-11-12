@@ -38,10 +38,6 @@ app.conf.beat_schedule = {
         'task': 'users.tasks.delete_expired_otps',
         'schedule': 300.0,  # Every 5 minutes
     },
-    'recover-trust-scores-daily': {
-        'task': 'users.tasks.recover_trust_scores_daily',
-        'schedule': crontab(hour=3, minute=0),  # Run daily at 3 AM
-    },
     # Order management tasks
     'cancel-pending-payment-reservations': {
         'task': 'university_food_system.tasks.background_tasks.cancel_pending_payment_reservations',

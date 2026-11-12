@@ -47,9 +47,9 @@ class CreateReservationSerializer(serializers.ModelSerializer):
         food = data.get('food')
 
         # Check trust score for voucher usage
-        if user.trust_score < 0 and (has_voucher or voucher_type):
+        if user.trust_score < 0 and (has_voucher or voucher_type or has_extra_voucher):
             raise serializers.ValidationError(
-                "Cannot use vouchers with a negative trust score"
+                "امکان استفاده از ژتون یا فیش تخفیف با امتیاز اعتبار منفی وجود ندارد. سفارش با پرداخت آزاد امکان‌پذیر است."
             )
 
         # Validate voucher_type eligibility
