@@ -53,7 +53,7 @@ class FoodDetailView(APIView):
         food = self.get_object(id)
         if not food:
             return Response({"error": "Food not found"}, status=status.HTTP_404_NOT_FOUND)
-        serializer = FoodSerializer(food, data=request.data, context={'request': request})
+        serializer = FoodSerializer(food, data=request.data, partial=True, context={'request': request})
         if serializer.is_valid():
             try:
                 serializer.save()
