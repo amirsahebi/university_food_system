@@ -21,11 +21,16 @@ class CreateReservationSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True
     )
+    extra_voucher_type = serializers.PrimaryKeyRelatedField(
+        queryset=VoucherType.objects.filter(is_active=True),
+        required=False,
+        allow_null=True
+    )
     has_extra_voucher = serializers.BooleanField(required=False, default=False)
 
     class Meta:
         model = Reservation
-        fields = ['food', 'time_slot', 'reserved_date', 'voucher_type', 'has_voucher', 'has_extra_voucher', 'meal_type']
+        fields = ['food', 'time_slot', 'reserved_date', 'voucher_type', 'extra_voucher_type', 'has_voucher', 'has_extra_voucher', 'meal_type']
         
     def validate_has_extra_voucher(self, value):
         """Validate that extra voucher can only be used with a regular voucher."""
@@ -47,7 +52,7 @@ class CreateReservationSerializer(serializers.ModelSerializer):
         food = data.get('food')
 
         # Check trust score for voucher usage
-        if user.trust_score < 0 and (has_voucher or voucher_type or has_extra_voucher):
+        if user.trust_score < 0 and (has_voucher or voucher_type or has_extra_voucher or data.get('extra_voucher_type')):
             raise serializers.ValidationError(
                 "امکان استفاده از ژتون یا فیش تخفیف با امتیاز اعتبار منفی وجود ندارد. سفارش با پرداخت آزاد امکان‌پذیر است."
             )
@@ -62,7 +67,20 @@ class CreateReservationSerializer(serializers.ModelSerializer):
                 )
             
         # Check extra voucher validation
-        if has_extra_voucher and food and not food.supports_extra_voucher:
+        extra_voucher_type = data.get('extra_voucher_type')
+        if extra_voucher_type:
+            data['has_extra_voucher'] = True
+            if not extra_voucher_type.is_active:
+                raise serializers.ValidationError("The selected extra voucher type is inactive.")
+            if food and not food.supports_extra_voucher and not food.allowed_extra_vouchers.exists():
+                raise serializers.ValidationError(
+                    "This food item does not support extra vouchers"
+                )
+            if food and food.allowed_extra_vouchers.exists() and not food.allowed_extra_vouchers.filter(id=extra_voucher_type.id).exists():
+                raise serializers.ValidationError(
+                    {"extra_voucher_type": f"'{food.name}' cannot be purchased with extra voucher {extra_voucher_type.name}."}
+                )
+        elif has_extra_voucher and food and not food.supports_extra_voucher:
             raise serializers.ValidationError(
                 "This food item does not support extra vouchers"
             )
@@ -137,6 +155,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     student = UserLessSerializer()
     food = FoodLessSerializer()
     voucher_type = VoucherTypeSerializer(read_only=True)
+    extra_voucher_type = VoucherTypeSerializer(read_only=True)
     voucher_discount_applied = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     trust_score = serializers.SerializerMethodField()
     trust_score_impact = serializers.IntegerField(read_only=True)
@@ -145,7 +164,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         model = Reservation
         fields = [
             'id', 'student', 'food', 'time_slot', 'reserved_date', 'meal_type',
-            'voucher_type', 'voucher_discount_applied', 'has_voucher', 'has_extra_voucher',
+            'voucher_type', 'extra_voucher_type', 'voucher_discount_applied', 'has_voucher', 'has_extra_voucher',
             'price', 'original_price', 'status', 'delivery_code',
             'created_at', 'updated_at', 'trust_score', 'trust_score_impact',
             'reservation_number'

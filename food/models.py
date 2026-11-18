@@ -34,6 +34,12 @@ class Food(models.Model):
         blank=True,
         help_text='Voucher types that can be redeemed for this food item'
     )
+    allowed_extra_vouchers = models.ManyToManyField(
+        'core.VoucherType',
+        related_name='allowed_extra_foods',
+        blank=True,
+        help_text='Voucher types that can be redeemed as extra vouchers for this food item'
+    )
     supports_extra_voucher = models.BooleanField(
         default=False,
         help_text='Whether this food item supports extra vouchers'

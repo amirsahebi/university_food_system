@@ -101,3 +101,20 @@ class OTP(models.Model):
     def generate_otp():
         return str(random.randint(100000, 999999))
 
+
+class WebPushSubscription(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='push_subscriptions')
+    endpoint = models.TextField(unique=True)
+    p256dh = models.CharField(max_length=255)
+    auth = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "اشتراک پوش وب"
+        verbose_name_plural = "اشتراک‌های پوش وب"
+
+    def __str__(self):
+        return f"{self.user.phone_number} ({self.created_at})"
+
+

@@ -167,6 +167,7 @@ class DailyMenuView(APIView):
                         'items',
                         queryset=DailyMenuItem.objects.select_related('food').prefetch_related(
                             'food__allowed_vouchers',
+                            'food__allowed_extra_vouchers',
                             Prefetch(
                                 'time_slots',
                                 queryset=TimeSlot.objects.all() if user.role == "admin"
@@ -184,6 +185,7 @@ class DailyMenuView(APIView):
                         'items',
                         queryset=DailyMenuItem.objects.select_related('food').prefetch_related(
                             'food__allowed_vouchers',
+                            'food__allowed_extra_vouchers',
                             Prefetch(
                                 'time_slots',
                                 queryset=TimeSlot.objects.all()

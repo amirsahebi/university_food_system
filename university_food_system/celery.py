@@ -27,6 +27,7 @@ app.conf.update(
 app.autodiscover_tasks([
     'users.tasks',
     'payments.tasks',
+    'orders.tasks',
     'university_food_system.tasks.background_tasks',
     # Add other task modules here as needed
 ])
@@ -46,6 +47,10 @@ app.conf.beat_schedule = {
     'check-and-reverse-failed-payments': {
         'task': 'payments.tasks.check_and_reverse_failed_payments',
         'schedule': timedelta(minutes=1),
+    },
+    'close-expired-ready-orders-nightly': {
+        'task': 'university_food_system.tasks.background_tasks.close_expired_ready_orders_task',
+        'schedule': crontab(hour=23, minute=45),  # Runs nightly at 23:45 (Asia/Tehran)
     },
 }
 

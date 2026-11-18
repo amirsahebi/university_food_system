@@ -34,30 +34,40 @@ class CreateTemplateMenuSerializer(serializers.ModelSerializer):
     class Meta:
         model = TemplateMenu
         fields = ['id', 'day', 'meal_type', 'items']
+        validators = []
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
 
-        template_menu = TemplateMenu.objects.filter(Q(day=validated_data["day"]) & Q(meal_type=validated_data["meal_type"]))
-        if template_menu:
-            template_menu = template_menu[0]
-        else:
+        template_menu = TemplateMenu.objects.filter(Q(day=validated_data["day"]) & Q(meal_type=validated_data["meal_type"])).first()
+        if not template_menu:
             template_menu = TemplateMenu.objects.create(
-            day = validated_data["day"],
-            meal_type = validated_data["meal_type"]
+                day=validated_data["day"],
+                meal_type=validated_data["meal_type"]
             )
-        print(items_data)
+        
         for item_data in items_data:
-            print(item_data)
-            TemplateMenuItem.objects.create(
-                template_menu=template_menu,
-                food_id = item_data.get('food').id,
-                start_time=item_data.get('start_time'),
-                end_time=item_data.get('end_time'),
-                time_slot_count=item_data.get('time_slot_count'),
-                time_slot_capacity=item_data.get('time_slot_capacity'),
-                daily_capacity=item_data.get('daily_capacity'),
-            )
+            food_obj = item_data.get('food')
+            food_id = food_obj.id if hasattr(food_obj, 'id') else food_obj
+
+            existing_item = TemplateMenuItem.objects.filter(template_menu=template_menu, food_id=food_id).first()
+            if existing_item:
+                existing_item.start_time = item_data.get('start_time')
+                existing_item.end_time = item_data.get('end_time')
+                existing_item.time_slot_count = item_data.get('time_slot_count')
+                existing_item.time_slot_capacity = item_data.get('time_slot_capacity')
+                existing_item.daily_capacity = item_data.get('daily_capacity')
+                existing_item.save()
+            else:
+                TemplateMenuItem.objects.create(
+                    template_menu=template_menu,
+                    food_id=food_id,
+                    start_time=item_data.get('start_time'),
+                    end_time=item_data.get('end_time'),
+                    time_slot_count=item_data.get('time_slot_count'),
+                    time_slot_capacity=item_data.get('time_slot_capacity'),
+                    daily_capacity=item_data.get('daily_capacity'),
+                )
         return template_menu
     
     def update(self, instance, validated_data):
@@ -93,12 +103,15 @@ class CreateDailyMenuItemSerializer(serializers.ModelSerializer):
 class CreateDailyMenuSerializer(serializers.ModelSerializer):
     items = CreateDailyMenuItemSerializer(many=True)
 
+    class Meta:
+        model = DailyMenu
+        fields = ['id', 'date', 'meal_type', 'items']
+        validators = []
+
     def create(self, validated_data):
-        daily_menu = DailyMenu.objects.filter(Q(date=validated_data["date"]) & Q(meal_type=validated_data["meal_type"]))
-        if daily_menu:
-            daily_menu = daily_menu[0]
-        else:
-            daily_menu = DailyMenu.objects.create(date=validated_data["date"],meal_type=validated_data["meal_type"])
+        daily_menu = DailyMenu.objects.filter(Q(date=validated_data["date"]) & Q(meal_type=validated_data["meal_type"])).first()
+        if not daily_menu:
+            daily_menu = DailyMenu.objects.create(date=validated_data["date"], meal_type=validated_data["meal_type"])
         items_data = validated_data.pop('items', [])
         # Ensure items_data is a list of dictionaries
         if isinstance(items_data, str):
@@ -111,20 +124,33 @@ class CreateDailyMenuSerializer(serializers.ModelSerializer):
                 )
 
         for item_data in items_data:
-
             # Set is_available to True by default if not provided
             is_available = item_data.get('is_available', True)
+            food_obj = item_data.get('food')
+            food_id = food_obj.id if hasattr(food_obj, 'id') else food_obj
             
-            daily_menu_item = DailyMenuItem.objects.create(
-                daily_menu=daily_menu,
-                food_id=item_data.get('food').id,
-                start_time=item_data.get('start_time'),
-                end_time=item_data.get('end_time'),
-                time_slot_count=item_data.get('time_slot_count'),
-                time_slot_capacity=item_data.get('time_slot_capacity'),
-                daily_capacity=item_data.get('daily_capacity'),
-                is_available=is_available
-            )
+            existing_item = DailyMenuItem.objects.filter(daily_menu=daily_menu, food_id=food_id).first()
+            if existing_item:
+                existing_item.start_time = item_data.get('start_time')
+                existing_item.end_time = item_data.get('end_time')
+                existing_item.time_slot_count = item_data.get('time_slot_count')
+                existing_item.time_slot_capacity = item_data.get('time_slot_capacity')
+                existing_item.daily_capacity = item_data.get('daily_capacity')
+                existing_item.is_available = is_available
+                existing_item.save()
+                existing_item.time_slots.all().delete()
+                daily_menu_item = existing_item
+            else:
+                daily_menu_item = DailyMenuItem.objects.create(
+                    daily_menu=daily_menu,
+                    food_id=food_id,
+                    start_time=item_data.get('start_time'),
+                    end_time=item_data.get('end_time'),
+                    time_slot_count=item_data.get('time_slot_count'),
+                    time_slot_capacity=item_data.get('time_slot_capacity'),
+                    daily_capacity=item_data.get('daily_capacity'),
+                    is_available=is_available
+                )
             daily_menu_item.refresh_from_db()
             
             # Calculate time slots
@@ -136,7 +162,6 @@ class CreateDailyMenuSerializer(serializers.ModelSerializer):
             
             # Create time slots
             for i in range(daily_menu_item.time_slot_count):
-    
                 start_time = (
                     (datetime.combine(datetime.today(), daily_menu_item.start_time) + 
                     timedelta(minutes=i * slot_duration)).time()
@@ -155,10 +180,6 @@ class CreateDailyMenuSerializer(serializers.ModelSerializer):
                 )
 
         return daily_menu
-
-    class Meta:
-        model = DailyMenu
-        fields = ['id', 'date', 'meal_type', 'items']
 
 
 class GetDailyMenuSerializer(serializers.ModelSerializer):

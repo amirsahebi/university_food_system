@@ -4,7 +4,8 @@ from .views import (
     SignOutView, RefreshTokenView, MeView,
     RequestPasswordResetView, ResetPasswordView, UserProfileUpdateView,
     ChangePasswordView, CheckPhoneNumberView, CheckStudentNumberView, TrustScoreView,
-    AdminTrustScoreRecoveryView, StudentListCreateAPIView, StudentRetrieveUpdateDestroyAPIView
+    AdminTrustScoreRecoveryView, StudentListCreateAPIView, StudentRetrieveUpdateDestroyAPIView,
+    PushSubscriptionView
 )
 
 
@@ -27,6 +28,7 @@ urlpatterns = [
     
     # Profile endpoints
     path('profile/update/', UserProfileUpdateView.as_view(), name='profile_update'),
+    path('push-subscription/', PushSubscriptionView.as_view(), name='push_subscription'),
     
     # Validation endpoints
     path('check-phone-number/', CheckPhoneNumberView.as_view(), name='check_phone_number'),

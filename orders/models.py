@@ -34,6 +34,14 @@ class Reservation(models.Model):
         related_name='reservations',
         help_text='The specific voucher type used for this reservation'
     )
+    extra_voucher_type = models.ForeignKey(
+        'core.VoucherType',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='extra_reservations',
+        help_text='The extra voucher type used for this reservation'
+    )
     voucher_discount_applied = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -107,6 +115,9 @@ class Reservation(models.Model):
         if self.voucher_type:
             discount = float(self.voucher_type.discount_amount)
             self.has_voucher = True
+            if self.extra_voucher_type and self.food.supports_extra_voucher:
+                discount += float(self.extra_voucher_type.discount_amount)
+                self.has_extra_voucher = True
         # Priority 2: Legacy boolean voucher
         elif self.has_voucher:
             voucher_price = float(Voucher.get_voucher_price())
@@ -203,6 +214,9 @@ class Reservation(models.Model):
         if self.voucher_type and hasattr(self, 'food') and self.food:
             if not self.food.allowed_vouchers.filter(id=self.voucher_type.id).exists():
                 raise ValueError(f"Food '{self.food.name}' does not allow voucher type '{self.voucher_type.name}'")
+        if self.extra_voucher_type and hasattr(self, 'food') and self.food:
+            if not self.food.allowed_extra_vouchers.filter(id=self.extra_voucher_type.id).exists():
+                raise ValueError(f"Food '{self.food.name}' does not allow extra voucher type '{self.extra_voucher_type.name}'")
         
         # Assign reservation number if not already assigned
         if not self.reservation_number:

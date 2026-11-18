@@ -56,11 +56,11 @@ def handle_reservation_status_change(sender, instance, **kwargs):
                         daily_menu_item.is_available = True
                     daily_menu_item.save()
                     
-                # Check if status is changing from 'preparing' to 'ready_to_pickup'
-                elif old_instance.status == 'preparing' and instance.status == 'ready_to_pickup':
+                # Check if status is changing to 'ready_to_pickup'
+                if old_instance.status != 'ready_to_pickup' and instance.status == 'ready_to_pickup':
                     # Update the updated_at timestamp
                     instance.updated_at = timezone.now()
-                    # Trigger async SMS notification safely on transaction commit
+                    # Trigger async SMS & Push notification safely on transaction commit
                     from orders.tasks import send_pickup_notification_task
                     res_id = instance.id
                     transaction.on_commit(lambda: send_pickup_notification_task.delay(res_id))

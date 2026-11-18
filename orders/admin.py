@@ -69,8 +69,13 @@ class ReservationAdmin(admin.ModelAdmin):
 
     @admin.action(description='Mark selected reservations as ready to pickup')
     def mark_as_ready_to_pickup(self, request, queryset):
-        updated = queryset.update(status='ready_to_pickup')
-        self.message_user(request, f'Successfully marked {updated} reservations as ready to pickup.')
+        count = 0
+        for reservation in queryset:
+            if reservation.status != 'ready_to_pickup':
+                reservation.status = 'ready_to_pickup'
+                reservation.save()
+                count += 1
+        self.message_user(request, f'Successfully marked {count} reservations as ready to pickup and triggered notifications.')
 
     @admin.action(description='Mark selected reservations as picked up')
     def mark_as_picked_up(self, request, queryset):
