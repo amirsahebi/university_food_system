@@ -1,0 +1,105 @@
+---
+- name: استقرار و به‌روزرسانی سامانه جوان‌فودز (JavanFoods Deployment)
+  hosts: production
+  become: yes
+  vars:
+    project_dir: /opt/javanfoods
+    backend_dir: "{{ project_dir }}/backend"
+    frontend_dir: "{{ project_dir }}/frontend"
+    git_repo_backend: "https://github.com/amirsahebi/university_food_system.git"
+    git_repo_frontend: "https://github.com/amirsahebi/university_food_system_frontend.git"
+
+  tasks:
+    - name: ۱. به‌روزرسانی مخازن لینوکس و نصب بسته‌های ضروری
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+        pkg:
+          - git
+          - curl
+          - ufw
+          - fail2ban
+          - nginx
+          - docker.io
+          - docker-compose
+        state: present
+
+    - name: ۲. اطمینان از فعال و روشن بودن سرویس‌های سیستمی
+      service:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - docker
+        - nginx
+        - fail2ban
+
+    - name: ۳. ایجاد ساختار پوشه‌های پروژه
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+      loop:
+        - "{{ project_dir }}"
+        - "{{ backend_dir }}"
+        - "{{ frontend_dir }}"
+
+    - name: ۴. همگام‌سازی و Pull آخرین تغییرات بک‌اند
+      git:
+        repo: "{{ git_repo_backend }}"
+        dest: "{{ backend_dir }}"
+        version: main
+        force: no
+      register: git_backend_result
+
+    - name: ۵. ساخت و اجرای کانتینرهای بک‌اند داکر
+      command: docker-compose up -d --build
+      args:
+        chdir: "{{ backend_dir }}"
+      when: git_backend_result.changed or ansible_run_tags is defined
+
+    - name: ۶. اجرای مایگریشن‌های پایگاه داده جنگو
+      command: docker-compose exec -T web python manage.py migrate --noinput
+      args:
+        chdir: "{{ backend_dir }}"
+
+    - name: ۷. جمع‌آوری فایل‌های استاتیک جنگو
+      command: docker-compose exec -T web python manage.py collectstatic --noinput
+      args:
+        chdir: "{{ backend_dir }}"
+
+    - name: ۸. همگام‌سازی و Pull آخرین تغییرات فرانت‌اند
+      git:
+        repo: "{{ git_repo_frontend }}"
+        dest: "{{ frontend_dir }}"
+        version: main
+        force: no
+      register: git_frontend_result
+
+    - name: ۹. نصب پکیج‌های فرانت‌اند و ری‌استارت سرویس
+      systemd:
+        name: javanfoods-frontend
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+    - name: ۱۰. بررسی و اعمال تنظیمات Nginx
+      command: nginx -t
+      changed_when: false
+
+    - name: ۱۱. ری‌لود سرویس Nginx
+      service:
+        name: nginx
+        state: reloaded
+
+    - name: ۱۲. تست سلامت سرور (Health Check)
+      uri:
+        url: "http://127.0.0.1:8000/health/"
+        status_code: 200
+        return_content: yes
+      register: health_check
+      retries: 5
+      delay: 3
+      until: health_check.status == 200
