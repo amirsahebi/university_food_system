@@ -147,13 +147,23 @@ class Reservation(models.Model):
             
         # Handle trust score updates based on status changes
         if self.status == 'picked_up':
-            # Award +1 trust score point per 100,000 Tomans of cumulative successful spending
+            # Award +1 trust score point per 100,000 Tomans of cumulative value (cash paid + voucher surplus)
+            # Crucial: Voucher surplus points are ONLY awarded after the order is picked up/delivered.
             paid_amount = int(self.price or 0)
-            if paid_amount > 0 and self.student_id:
+            voucher_discount = float(self.voucher_discount_applied or 0)
+            if voucher_discount == 0 and self.voucher_type:
+                voucher_discount = float(self.voucher_type.discount_amount or 0)
+                if self.extra_voucher_type and (not self.food or self.food.supports_extra_voucher):
+                    voucher_discount += float(self.extra_voucher_type.discount_amount or 0)
+            food_price = float(self.original_price or (self.food.price if self.food else 0) or 0)
+            surplus_amount = max(0, int(voucher_discount - food_price))
+
+            credited_amount = paid_amount + surplus_amount
+            if credited_amount > 0 and self.student_id:
                 with transaction.atomic():
                     from users.models import User
                     student = User.objects.select_for_update().get(id=self.student_id)
-                    student.total_spent = (student.total_spent or 0) + paid_amount
+                    student.total_spent = (student.total_spent or 0) + credited_amount
                     total_points_deserved = student.total_spent // 100000
                     already_awarded = student.loyalty_points_awarded or 0
                     points_to_award = max(0, total_points_deserved - already_awarded)

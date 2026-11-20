@@ -76,8 +76,9 @@ class TrustScoreAndLoyaltyTestCase(TestCase):
             capacity=50
         )
 
-    def _create_reservation(self, student, price, original_price=None, has_voucher=False, voucher_type=None, has_extra_voucher=False):
+    def _create_reservation(self, student, price, original_price=None, has_voucher=False, voucher_type=None, has_extra_voucher=False, voucher_discount_applied=None):
         orig_price = original_price if original_price is not None else price
+        discount = voucher_discount_applied if voucher_discount_applied is not None else (voucher_type.discount_amount if voucher_type else 0)
         return Reservation.objects.create(
             student=student,
             food=self.food,
@@ -87,6 +88,7 @@ class TrustScoreAndLoyaltyTestCase(TestCase):
             status='ready_to_pickup',
             price=price,
             original_price=orig_price,
+            voucher_discount_applied=discount,
             has_voucher=has_voucher,
             voucher_type=voucher_type,
             has_extra_voucher=has_extra_voucher
@@ -133,9 +135,9 @@ class TrustScoreAndLoyaltyTestCase(TestCase):
 
     def test_free_order_does_not_award_points(self):
         """
-        An order with price=0 (e.g., 100% voucher discount) must not award loyalty points.
+        An order with price=0 and no surplus (voucher == food price) must not award loyalty points.
         """
-        order = self._create_reservation(self.student, price=0, has_voucher=True, voucher_type=self.voucher_type)
+        order = self._create_reservation(self.student, price=0, original_price=20000, voucher_discount_applied=20000, has_voucher=True, voucher_type=self.voucher_type)
         order.status = 'picked_up'
         order.save()
 
@@ -143,6 +145,80 @@ class TrustScoreAndLoyaltyTestCase(TestCase):
         self.assertEqual(self.student.total_spent, 0)
         self.assertEqual(self.student.loyalty_points_awarded, 0)
         self.assertEqual(self.student.trust_score, 10)
+
+    def test_voucher_surplus_awards_points_per_100k_only_after_picked_up(self):
+        """
+        Voucher surplus (discount exceeding food price) MUST:
+        1. Accumulate at 1 point per 100,000 Tomans (not per 100 Tomans).
+        2. ONLY be awarded after the reservation is picked up (delivered).
+        """
+        # Order 1: Food = 230,000, Vouchers = 250,000, Surplus = 20,000, Price = 0
+        order1 = self._create_reservation(
+            self.student,
+            price=0,
+            original_price=230000,
+            voucher_discount_applied=250000,
+            has_voucher=True,
+            voucher_type=self.voucher_type
+        )
+        # Status is still 'ready_to_pickup' - MUST NOT award any points yet!
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.total_spent, 0, "No spending/points before pickup")
+        self.assertEqual(self.student.trust_score, 10, "Trust score must not change before pickup")
+
+        # Receiver marks order1 as 'picked_up'
+        order1.status = 'picked_up'
+        order1.save()
+
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.total_spent, 20000, "Surplus 20k should be credited to cumulative spending")
+        self.assertEqual(self.student.trust_score, 10, "20k < 100k so no point awarded yet")
+
+        # Order 2: Food = 100,000, Vouchers = 180,000, Surplus = 80,000, Price = 0
+        order2 = self._create_reservation(
+            self.student,
+            price=0,
+            original_price=100000,
+            voucher_discount_applied=180000,
+            has_voucher=True,
+            voucher_type=self.voucher_type
+        )
+        # Before pickup of order 2
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.trust_score, 10, "Score remains unchanged before pickup of order 2")
+
+        # Receiver marks order2 as 'picked_up'
+        order2.status = 'picked_up'
+        order2.save()
+
+        self.student.refresh_from_db()
+        # Cumulative = 20k + 80k = 100k -> exactly crosses 100,000 Tomans -> +1 point!
+        self.assertEqual(self.student.total_spent, 100000)
+        self.assertEqual(self.student.loyalty_points_awarded, 1)
+        self.assertEqual(self.student.trust_score, 11, "Score should increase by +1 after reaching 100k surplus")
+
+    def test_large_voucher_surplus_multiple_points_only_on_pickup(self):
+        """
+        Large surplus >= 200,000 Tomans awards +2 points only upon pickup.
+        """
+        order = self._create_reservation(
+            self.student,
+            price=0,
+            original_price=100000,
+            voucher_discount_applied=300000,
+            has_voucher=True,
+            voucher_type=self.voucher_type
+        )
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.trust_score, 10, "No score increase before pickup")
+
+        order.status = 'picked_up'
+        order.save()
+
+        self.student.refresh_from_db()
+        self.assertEqual(self.student.total_spent, 200000)
+        self.assertEqual(self.student.loyalty_points_awarded, 2)
+        self.assertEqual(self.student.trust_score, 12, "Score should increase by +2 on crossing 200k")
 
     def test_penalty_for_not_picked_up_with_voucher(self):
         """
