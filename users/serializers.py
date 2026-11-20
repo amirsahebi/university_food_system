@@ -117,17 +117,24 @@ class StudentSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(source='phone_number')
     status = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(source='date_joined')
+    reservations_count = serializers.SerializerMethodField()
+    total_spent = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = User
         fields = [
             'id', 'name', 'student_id', 'email', 'phone', 'is_active',
-            'trust_score', 'status', 'created_at'
+            'trust_score', 'status', 'created_at', 'reservations_count', 'total_spent'
         ]
-        read_only_fields = ['id', 'trust_score', 'created_at']
+        read_only_fields = ['id', 'trust_score', 'created_at', 'reservations_count', 'total_spent']
 
     def get_name(self, obj):
         return f"{obj.first_name} {obj.last_name}"
 
     def get_status(self, obj):
         return 'active' if obj.is_active else 'inactive'
+
+    def get_reservations_count(self, obj):
+        if hasattr(obj, 'reservations_count'):
+            return obj.reservations_count
+        return obj.reservations.count()

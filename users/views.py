@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status, generics, permissions, viewsets, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from django.shortcuts import get_object_or_404
-from django.db.models import Q
+from django.db.models import Q, Count
 from .models import User
 from .serializers import (
     UserSerializer, CreateUserSerializer, LoginSerializer,
@@ -46,7 +46,9 @@ class StudentListCreateAPIView(APIView):
     permission_classes = [IsAdminUser]
     
     def get_queryset(self):
-        queryset = User.objects.filter(role='student').order_by('-date_joined')
+        queryset = User.objects.filter(role='student').annotate(
+            reservations_count=Count('reservations')
+        ).order_by('-date_joined')
         search = self.request.query_params.get('search')
         if search:
             queryset = queryset.filter(

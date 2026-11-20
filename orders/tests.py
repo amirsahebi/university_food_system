@@ -55,9 +55,9 @@ class TrustScoreAndLoyaltyTestCase(TestCase):
         self.food.allowed_vouchers.add(self.voucher_type)
 
         # Create menu and time slots
-        today = timezone.localdate()
+        tomorrow = timezone.localdate() + timedelta(days=1)
         self.daily_menu = DailyMenu.objects.create(
-            date=today,
+            date=tomorrow,
             meal_type='lunch'
         )
         self.menu_item = DailyMenuItem.objects.create(
