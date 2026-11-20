@@ -141,58 +141,8 @@ class FoodSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        price = attrs.get('price')
-        if price is None and self.instance:
-            price = self.instance.price
-
-        allowed_vouchers = attrs.get('allowed_vouchers')
-        if allowed_vouchers is None and self.instance:
-            allowed_vouchers = list(self.instance.allowed_vouchers.all())
-
-        allowed_extra_vouchers = attrs.get('allowed_extra_vouchers')
-        if allowed_extra_vouchers is None and self.instance:
-            allowed_extra_vouchers = list(self.instance.allowed_extra_vouchers.all())
-
-        supports_extra_voucher = attrs.get('supports_extra_voucher')
-        if supports_extra_voucher is None and self.instance:
-            supports_extra_voucher = self.instance.supports_extra_voucher
-
-        if price:
-            # 1. Single regular voucher discount cannot exceed food price
-            if allowed_vouchers:
-                for v1 in allowed_vouchers:
-                    if v1.discount_amount > price:
-                        raise serializers.ValidationError({
-                            'allowed_voucher_ids': (
-                                f"تخفیف ژتون «{v1.name}» ({v1.discount_amount:,.0f} تومان) "
-                                f"نمی‌تواند از قیمت کل غذا ({price:,.0f} تومان) بیشتر باشد."
-                            )
-                        })
-
-            # 2. If extra voucher is enabled, validate extra vouchers and dual combinations
-            if supports_extra_voucher:
-                if allowed_extra_vouchers:
-                    for v2 in allowed_extra_vouchers:
-                        if v2.discount_amount > price:
-                            raise serializers.ValidationError({
-                                'allowed_extra_voucher_ids': (
-                                    f"تخفیف ژتون اضافه «{v2.name}» ({v2.discount_amount:,.0f} تومان) "
-                                    f"نمی‌تواند از قیمت کل غذا ({price:,.0f} تومان) بیشتر باشد."
-                                )
-                            })
-
-                if allowed_vouchers and allowed_extra_vouchers:
-                    for v1 in allowed_vouchers:
-                        for v2 in allowed_extra_vouchers:
-                            if (v1.discount_amount + v2.discount_amount) > price:
-                                raise serializers.ValidationError({
-                                    'allowed_extra_voucher_ids': (
-                                        f"مجموع تخفیف فیش اول ({v1.name}: {v1.discount_amount:,.0f} تومان) "
-                                        f"و فیش اضافه ({v2.name}: {v2.discount_amount:,.0f} تومان) "
-                                        f"برابر {(v1.discount_amount + v2.discount_amount):,.0f} تومان است "
-                                        f"که از قیمت غذا ({price:,.0f} تومان) بیشتر می‌شود."
-                                    )
-                                })
+        # Allow any voucher combination, including when total voucher discount exceeds food price.
+        # Excess discount is converted to student club reward points in the ordering flow.
         return attrs
 
     def update(self, instance, validated_data):
