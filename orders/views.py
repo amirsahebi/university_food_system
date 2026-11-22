@@ -12,6 +12,7 @@ from university_food_system.permissions import (
 )
 from django.db.models import Q
 from django.db import transaction
+from django.utils import timezone
 import pytz
 from datetime import datetime
 
@@ -267,18 +268,74 @@ class CancelReservationView(APIView):
     permission_classes = [IsAuthenticated, IsStudentOrAdmin]
 
     def delete(self, request, id):
-        """Allow a user to cancel their reservation if status is pending_payment."""
+        """Allow a user to cancel their reservation if eligible."""
         try:
-            reservation = Reservation.objects.get(id=id)
+            reservation = Reservation.objects.select_related('time_slot__daily_menu_item', 'food', 'student').get(id=id)
         except Reservation.DoesNotExist:
-            return Response({"error": "Reservation not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response({"error": "سفارش مورد نظر یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
 
-        if reservation.student != request.user:
-            return Response({"error": "You can only cancel your own reservation."}, status=status.HTTP_403_FORBIDDEN)
+        if reservation.student != request.user and not (request.user.is_staff or getattr(request.user, 'role', '') == 'admin'):
+            return Response({"error": "شما تنها مجاز به لغو سفارش‌های خود هستید."}, status=status.HTTP_403_FORBIDDEN)
 
-        if reservation.status != 'pending_payment':
-            return Response({"error": "Reservation can only be cancelled if status is pending_payment."}, status=status.HTTP_400_BAD_REQUEST)
+        if reservation.status not in ['waiting', 'pending_payment']:
+            return Response({
+                "error": "این سفارش در وضعیتی نیست که امکان لغو آن وجود داشته باشد."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
-        reservation.status = 'cancelled'
-        reservation.save(update_fields=["status"])
-        return Response({"success": "Reservation cancelled."}, status=status.HTTP_200_OK)
+        # Time deadline check:
+        # Future date orders can be cancelled anytime.
+        # Today's orders can only be cancelled before the earliest start time of this food item.
+        IRAN_TZ = pytz.timezone("Asia/Tehran")
+        iran_now = timezone.now().astimezone(IRAN_TZ)
+        today = iran_now.date()
+        current_time = iran_now.time()
+
+        if reservation.reserved_date < today:
+            return Response({"error": "امکان لغو سفارش‌های گذشته وجود ندارد."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if reservation.reserved_date == today:
+            earliest_time = None
+            if reservation.time_slot and hasattr(reservation.time_slot, 'daily_menu_item'):
+                dmi = reservation.time_slot.daily_menu_item
+                if dmi.start_time:
+                    earliest_time = dmi.start_time
+                else:
+                    first_slot = dmi.time_slots.order_by('start_time').first()
+                    if first_slot:
+                        earliest_time = first_slot.start_time
+
+            if earliest_time and current_time >= earliest_time:
+                formatted_time = earliest_time.strftime("%H:%M")
+                return Response({
+                    "error": f"با توجه به آغاز فرآیند توزیع این غذا در سلف از ساعت {formatted_time}، امکان لغو سفارش وجود ندارد."
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            res = Reservation.objects.select_for_update().get(id=reservation.id)
+            if res.status not in ['waiting', 'pending_payment']:
+                return Response({"error": "این سفارش در وضعیتی نیست که امکان لغو آن وجود داشته باشد."}, status=status.HTTP_400_BAD_REQUEST)
+
+            refund_amount = int(res.price or 0)
+            wallet_balance = None
+
+            if res.status == 'waiting' and refund_amount > 0 and res.student:
+                from payments.models import Wallet, WalletTransaction
+                wallet = Wallet.get_or_create_wallet(res.student)
+                food_name = res.food.name if res.food else "غذا"
+                wallet.deposit(
+                    amount=refund_amount,
+                    transaction_type=WalletTransaction.TYPE_ORDER_REFUND,
+                    reservation=res,
+                    description=f"استرداد وجه لغو سفارش {food_name} (سفارش #{res.id})"
+                )
+                wallet_balance = wallet.balance
+
+            res.status = 'cancelled'
+            res.save()
+
+        return Response({
+            "success": True,
+            "message": "سفارش با موفقیت لغو شد.",
+            "refunded_amount": refund_amount,
+            "wallet_balance": wallet_balance
+        }, status=status.HTTP_200_OK)

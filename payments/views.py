@@ -7,11 +7,16 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import Payment
+import pytz
+from .models import Payment, Wallet, WalletTransaction
 from .serializers import (
     PaymentRequestSerializer, 
     PaymentSerializer, 
     AdminPaymentSerializer,
+    WalletSerializer,
+    WalletTransactionSerializer,
+    WalletTopupRequestSerializer,
+    WalletPayOrderSerializer,
 )
 from .utils import request_payment, verify_payment, inquire_payment, ZARINPAL_STARTPAY_URL
 from django.conf import settings
@@ -134,9 +139,20 @@ class PaymentVerifyView(APIView):
                     payment.status = 'paid'
                     payment.save()
                     
-                    # Update reservation status to 'waiting'
-                    payment.reservation.status = 'waiting'
-                    payment.reservation.save()
+                    if payment.payment_type == Payment.PAYMENT_TYPE_WALLET_TOPUP or not payment.reservation:
+                        wallet = Wallet.get_or_create_wallet(payment.user)
+                        existing_tx = WalletTransaction.objects.filter(payment=payment).first()
+                        if not existing_tx:
+                            wallet.deposit(
+                                amount=payment.amount,
+                                transaction_type=WalletTransaction.TYPE_DEPOSIT,
+                                payment=payment,
+                                description=f"شارژ آنلاین کیف پول (شناسه پیگیری: {payment.ref_id})"
+                            )
+                    elif payment.reservation:
+                        # Update reservation status to 'waiting'
+                        payment.reservation.status = 'waiting'
+                        payment.reservation.save()
                     
                     logger.info(f"Payment {payment.id} verified successfully with ref_id: {payment.ref_id}")
                     return self._handle_successful_payment(payment)
@@ -172,12 +188,21 @@ class PaymentVerifyView(APIView):
     
     def _handle_successful_payment(self, payment):
         """Handle successful payment verification."""
-        return Response({
+        data = {
             "success": True,
             "ref_id": payment.ref_id,
-            "reservation_id": payment.reservation.id,
-            "status": "paid"
-        })
+            "status": "paid",
+            "amount": payment.amount
+        }
+        if payment.reservation:
+            data["reservation_id"] = payment.reservation.id
+            data["type"] = "reservation"
+        else:
+            data["type"] = "wallet_topup"
+            if payment.user:
+                wallet = Wallet.get_or_create_wallet(payment.user)
+                data["balance"] = wallet.balance
+        return Response(data)
     
     def _handle_failed_payment(self, payment, error_message, error_code=None):
         """Handle failed payment verification."""
@@ -189,8 +214,8 @@ class PaymentVerifyView(APIView):
                 payment.status = 'failed'
                 payment.save()
                 
-                # Only cancel the reservation if it's still in pending state
-                if payment.reservation.status == 'pending_payment':
+                # Only cancel the reservation if it exists and is still in pending state
+                if payment.reservation and payment.reservation.status == 'pending_payment':
                     payment.reservation.status = 'cancelled'
                     payment.reservation.save()
                     logger.info(f"Cancelled reservation {payment.reservation.id} due to payment failure")
@@ -447,3 +472,152 @@ class PaymentInquiryView(APIView):
             'payment': payment_data,
             'reversed': reversed_during_request
         })
+
+
+class MyWalletView(APIView):
+    """Retrieve current user's wallet balance and recent transactions."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        wallet = Wallet.get_or_create_wallet(request.user)
+        serializer = WalletSerializer(wallet)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class WalletTopupView(APIView):
+    """Request a wallet top-up via ZarinPal."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = WalletTopupRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        amount = serializer.validated_data['amount']
+        callback_url = serializer.validated_data['callback_url']
+
+        logger.info(f"Initiating wallet topup for user {request.user.id} amount {amount} Tomans")
+        try:
+            response = request_payment(amount, callback_url, request.user)
+            if response.get("data") and response["data"].get("code") == 100:
+                authority = response["data"]["authority"]
+                payment = Payment.objects.create(
+                    user=request.user,
+                    amount=amount,
+                    authority=authority,
+                    status=Payment.STATUS_PENDING,
+                    payment_type=Payment.PAYMENT_TYPE_WALLET_TOPUP,
+                    reservation=None
+                )
+                return Response({
+                    "payment": PaymentSerializer(payment).data,
+                    "redirect_url": f"{ZARINPAL_STARTPAY_URL}{authority}"
+                }, status=status.HTTP_201_CREATED)
+
+            error_msg = response.get("errors", "Payment request failed")
+            logger.error(f"Wallet topup payment request failed: {error_msg}")
+            return Response({"error": error_msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error initiating wallet topup: {str(e)}")
+            return Response({"error": "خطا در ارتباط با درگاه پرداخت"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class WalletPayOrderView(APIView):
+    """Pay for a pending reservation using the user's wallet balance."""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = WalletPayOrderSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        reservation_id = serializer.validated_data['reservation_id']
+        IRAN_TZ = pytz.timezone("Asia/Tehran")
+
+        try:
+            with transaction.atomic():
+                reservation = Reservation.objects.select_for_update().get(
+                    id=reservation_id,
+                    student=request.user
+                )
+
+                if reservation.status != 'pending_payment':
+                    return Response({
+                        "error": "این سفارش در وضعیت 'در انتظار پرداخت' نیست یا قبلاً پرداخت شده است."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Check if timeslot hasn't expired
+                iran_now = timezone.now().astimezone(IRAN_TZ)
+                if reservation.reserved_date == iran_now.date() and reservation.time_slot and reservation.time_slot.end_time <= iran_now.time():
+                    return Response({
+                        "error": "بازه زمانی دریافت این سفارش به پایان رسیده است."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                order_price = int(reservation.price)
+                wallet = Wallet.get_or_create_wallet(request.user)
+                locked_wallet = Wallet.objects.select_for_update().get(id=wallet.id)
+
+                if order_price > 0:
+                    if locked_wallet.balance < order_price:
+                        shortage = order_price - locked_wallet.balance
+                        return Response({
+                            "error": "موجودی کیف پول شما کافی نیست.",
+                            "balance": locked_wallet.balance,
+                            "required": order_price,
+                            "shortage": shortage
+                        }, status=status.HTTP_400_BAD_REQUEST)
+
+                    food_name = reservation.food.name if reservation.food else "غذا"
+                    tx = locked_wallet.withdraw(
+                        amount=order_price,
+                        transaction_type=WalletTransaction.TYPE_ORDER_PAYMENT,
+                        reservation=reservation,
+                        description=f"پرداخت هزینه سفارش {food_name} (سفارش #{reservation.id})"
+                    )
+
+                # Mark reservation as waiting
+                reservation.status = 'waiting'
+                reservation.save()
+
+                # Cancel other pending orders for the same meal/date
+                Reservation.objects.filter(
+                    student=request.user,
+                    reserved_date=reservation.reserved_date,
+                    meal_type=reservation.meal_type,
+                    status='pending_payment',
+                ).exclude(id=reservation.id).update(status='cancelled')
+
+                # Create Payment record for reporting
+                tx_ref = f"WALLET-{reservation.id}" if order_price == 0 else f"WALLET-{tx.id}"
+                Payment.objects.create(
+                    user=request.user,
+                    reservation=reservation,
+                    amount=order_price,
+                    status=Payment.STATUS_PAID,
+                    ref_id=tx_ref,
+                    payment_type=Payment.PAYMENT_TYPE_RESERVATION
+                )
+
+                return Response({
+                    "success": True,
+                    "message": "پرداخت با موفقیت از کیف پول انجام شد.",
+                    "status": "waiting",
+                    "balance": locked_wallet.balance,
+                }, status=status.HTTP_200_OK)
+
+        except Reservation.DoesNotExist:
+            return Response({"error": "سفارش یافت نشد."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error processing wallet payment for order {reservation_id}: {str(e)}")
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class WalletTransactionsListView(generics.ListAPIView):
+    """Paginated list of wallet transactions for the current user."""
+    permission_classes = [IsAuthenticated]
+    serializer_class = WalletTransactionSerializer
+
+    def get_queryset(self):
+        wallet = Wallet.get_or_create_wallet(self.request.user)
+        return wallet.transactions.all().order_by('-created_at')
+

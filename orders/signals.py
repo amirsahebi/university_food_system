@@ -41,20 +41,21 @@ def handle_reservation_status_change(sender, instance, **kwargs):
             if instance.pk:
                 old_instance = Reservation.objects.get(pk=instance.pk)
                 
-                # Handle cancelled status change
-                if old_instance.status == 'pending_payment' and instance.status == 'cancelled':
-                    # Restore capacity
-                    instance.time_slot.capacity += 1
-                    instance.time_slot.save()
-                    
-                    # Restore daily menu item capacity
-                    daily_menu_item = instance.time_slot.daily_menu_item
-                    daily_menu_item.daily_capacity += 1
-                    
-                    # If capacity was zero, mark as available again
-                    if daily_menu_item.daily_capacity > 0 and not daily_menu_item.is_available:
-                        daily_menu_item.is_available = True
-                    daily_menu_item.save()
+                # Handle cancelled status change (both from pending_payment and waiting)
+                if old_instance.status in ['pending_payment', 'waiting'] and instance.status == 'cancelled':
+                    if instance.time_slot:
+                        # Restore capacity
+                        instance.time_slot.capacity += 1
+                        instance.time_slot.save()
+                        
+                        # Restore daily menu item capacity
+                        daily_menu_item = instance.time_slot.daily_menu_item
+                        daily_menu_item.daily_capacity += 1
+                        
+                        # If capacity was zero, mark as available again
+                        if daily_menu_item.daily_capacity > 0 and not daily_menu_item.is_available:
+                            daily_menu_item.is_available = True
+                        daily_menu_item.save()
                     
                 # Check if status is changing to 'ready_to_pickup'
                 if old_instance.status != 'ready_to_pickup' and instance.status == 'ready_to_pickup':

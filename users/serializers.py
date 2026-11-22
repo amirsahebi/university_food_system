@@ -4,15 +4,22 @@ from .models import User
 
 class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
+    wallet_balance = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'phone_number', 'student_number', 'first_name', 'last_name', 'role', 'is_active' ,'avatar' ,'avatar_url']
+        fields = ['id', 'phone_number', 'student_number', 'first_name', 'last_name', 'role', 'is_active', 'avatar', 'avatar_url', 'wallet_balance']
 
     def get_avatar_url(self, obj):
         if obj.avatar:
             return self.context['request'].build_absolute_uri(obj.avatar.url)
         return None
+
+    def get_wallet_balance(self, obj):
+        try:
+            return obj.wallet.balance
+        except Exception:
+            return 0
 
 
 class CreateUserSerializer(serializers.ModelSerializer):
@@ -119,14 +126,15 @@ class StudentSerializer(serializers.ModelSerializer):
     created_at = serializers.DateTimeField(source='date_joined')
     reservations_count = serializers.SerializerMethodField()
     total_spent = serializers.IntegerField(read_only=True)
+    wallet_balance = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = [
             'id', 'name', 'student_id', 'email', 'phone', 'is_active',
-            'trust_score', 'status', 'created_at', 'reservations_count', 'total_spent'
+            'trust_score', 'status', 'created_at', 'reservations_count', 'total_spent', 'wallet_balance'
         ]
-        read_only_fields = ['id', 'trust_score', 'created_at', 'reservations_count', 'total_spent']
+        read_only_fields = ['id', 'trust_score', 'created_at', 'reservations_count', 'total_spent', 'wallet_balance']
 
     def get_name(self, obj):
         return f"{obj.first_name} {obj.last_name}"
@@ -138,3 +146,9 @@ class StudentSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'reservations_count'):
             return obj.reservations_count
         return obj.reservations.count()
+
+    def get_wallet_balance(self, obj):
+        try:
+            return obj.wallet.balance
+        except Exception:
+            return 0

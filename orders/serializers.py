@@ -159,6 +159,8 @@ class ReservationSerializer(serializers.ModelSerializer):
     voucher_discount_applied = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     trust_score = serializers.SerializerMethodField()
     trust_score_impact = serializers.IntegerField(read_only=True)
+    can_cancel = serializers.SerializerMethodField()
+    cancellation_deadline = serializers.SerializerMethodField()
 
     class Meta:
         model = Reservation
@@ -167,10 +169,41 @@ class ReservationSerializer(serializers.ModelSerializer):
             'voucher_type', 'extra_voucher_type', 'voucher_discount_applied', 'has_voucher', 'has_extra_voucher',
             'price', 'original_price', 'status', 'delivery_code',
             'created_at', 'updated_at', 'trust_score', 'trust_score_impact',
-            'reservation_number'
+            'reservation_number', 'can_cancel', 'cancellation_deadline'
         ]
         read_only_fields = ['price', 'original_price', 'delivery_code', 'reservation_number', 'status']
     
     def get_trust_score(self, obj):
         """Get the current trust score of the student."""
         return obj.student.trust_score if obj.student else 0
+
+    def get_can_cancel(self, obj):
+        """Check if reservation can currently be cancelled based on earliest food start time."""
+        if obj.status not in ['waiting', 'pending_payment']:
+            return False
+        iran_now = timezone.now().astimezone(IRAN_TZ)
+        today = iran_now.date()
+        if obj.reserved_date < today:
+            return False
+        if obj.reserved_date > today:
+            return True
+        # For today: check earliest food start time
+        if obj.time_slot and hasattr(obj.time_slot, 'daily_menu_item'):
+            dmi = obj.time_slot.daily_menu_item
+            earliest = dmi.start_time
+            if not earliest and dmi.time_slots.exists():
+                earliest = dmi.time_slots.order_by('start_time').first().start_time
+            if earliest and iran_now.time() >= earliest:
+                return False
+        return True
+
+    def get_cancellation_deadline(self, obj):
+        """Return the start time of the earliest slot for this food on this date."""
+        if obj.time_slot and hasattr(obj.time_slot, 'daily_menu_item'):
+            dmi = obj.time_slot.daily_menu_item
+            earliest = dmi.start_time
+            if not earliest and dmi.time_slots.exists():
+                earliest = dmi.time_slots.order_by('start_time').first().start_time
+            if earliest:
+                return earliest.strftime("%H:%M")
+        return None

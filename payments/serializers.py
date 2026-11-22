@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.utils import timezone
 from django.db.models import Q
-from .models import Payment
+from .models import Payment, Wallet, WalletTransaction
 from users.serializers import UserSerializer
 from orders.serializers import ReservationSerializer
 from core.logging_utils import get_logger
@@ -74,3 +74,43 @@ class PaymentFilterSerializer(serializers.Serializer):
                     'end_date': 'End date must be after start date.'
                 })
         return data
+
+
+class WalletTransactionSerializer(serializers.ModelSerializer):
+    transaction_type_display = serializers.CharField(source='get_transaction_type_display', read_only=True)
+    food_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WalletTransaction
+        fields = [
+            'id', 'amount', 'balance_after', 'transaction_type', 
+            'transaction_type_display', 'reservation', 'food_name',
+            'description', 'created_at'
+        ]
+
+    def get_food_name(self, obj):
+        if obj.reservation and obj.reservation.food:
+            return obj.reservation.food.name
+        return None
+
+
+class WalletSerializer(serializers.ModelSerializer):
+    transactions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Wallet
+        fields = ['id', 'balance', 'updated_at', 'transactions']
+
+    def get_transactions(self, obj):
+        recent_txs = obj.transactions.all()[:20]
+        return WalletTransactionSerializer(recent_txs, many=True).data
+
+
+class WalletTopupRequestSerializer(serializers.Serializer):
+    amount = serializers.IntegerField(min_value=1000, help_text="Amount in Tomans (min 1,000 Tomans)")
+    callback_url = serializers.URLField()
+
+
+class WalletPayOrderSerializer(serializers.Serializer):
+    reservation_id = serializers.IntegerField()
+

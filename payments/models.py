@@ -47,12 +47,25 @@ class Payment(models.Model):
         (STATUS_REVERSED, 'Reversed'),
     ]
 
+    PAYMENT_TYPE_RESERVATION = 'reservation'
+    PAYMENT_TYPE_WALLET_TOPUP = 'wallet_topup'
+    PAYMENT_TYPE_CHOICES = [
+        (PAYMENT_TYPE_RESERVATION, 'Reservation'),
+        (PAYMENT_TYPE_WALLET_TOPUP, 'Wallet Top-up'),
+    ]
+
     user = models.ForeignKey(
         User, 
         on_delete=models.SET_NULL, 
         null=True, 
         blank=True, 
         related_name="payments",
+        db_index=True
+    )
+    payment_type = models.CharField(
+        max_length=20,
+        choices=PAYMENT_TYPE_CHOICES,
+        default=PAYMENT_TYPE_RESERVATION,
         db_index=True
     )
     reservation = models.ForeignKey(
@@ -197,3 +210,147 @@ class Payment(models.Model):
             logger.info(f"Reactivated reservation {self.reservation.id} after payment reversal")
             
         return True
+
+
+class Wallet(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="wallet",
+        db_index=True
+    )
+    balance = models.BigIntegerField(
+        default=0,
+        help_text="Wallet balance in Tomans"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(balance__gte=0),
+                name="wallet_balance_non_negative"
+            )
+        ]
+        indexes = [
+            models.Index(fields=['user', 'balance']),
+        ]
+
+    def __str__(self):
+        phone = getattr(self.user, 'phone_number', self.user_id)
+        return f"Wallet({phone}): {self.balance:,} Tomans"
+
+    @classmethod
+    def get_or_create_wallet(cls, user):
+        wallet, _ = cls.objects.get_or_create(user=user)
+        return wallet
+
+    @transaction.atomic
+    def deposit(self, amount, transaction_type='deposit', reservation=None, payment=None, description=""):
+        if amount <= 0:
+            raise ValueError("مبلغ واریز باید بزرگتر از صفر باشد.")
+        
+        locked_wallet = Wallet.objects.select_for_update().get(pk=self.pk)
+        locked_wallet.balance += amount
+        locked_wallet.save(update_fields=['balance', 'updated_at'])
+        
+        tx = WalletTransaction.objects.create(
+            wallet=locked_wallet,
+            amount=amount,
+            balance_after=locked_wallet.balance,
+            transaction_type=transaction_type,
+            reservation=reservation,
+            payment=payment,
+            description=description
+        )
+        self.balance = locked_wallet.balance
+        return tx
+
+    @transaction.atomic
+    def withdraw(self, amount, transaction_type='order_payment', reservation=None, payment=None, description=""):
+        if amount <= 0:
+            raise ValueError("مبلغ برداشت باید بزرگتر از صفر باشد.")
+        
+        locked_wallet = Wallet.objects.select_for_update().get(pk=self.pk)
+        if locked_wallet.balance < amount:
+            raise ValueError("موجودی کیف پول برای انجام این تراکنش کافی نیست.")
+        
+        locked_wallet.balance -= amount
+        locked_wallet.save(update_fields=['balance', 'updated_at'])
+        
+        tx = WalletTransaction.objects.create(
+            wallet=locked_wallet,
+            amount=-amount,
+            balance_after=locked_wallet.balance,
+            transaction_type=transaction_type,
+            reservation=reservation,
+            payment=payment,
+            description=description
+        )
+        self.balance = locked_wallet.balance
+        return tx
+
+
+class WalletTransaction(models.Model):
+    TYPE_DEPOSIT = 'deposit'
+    TYPE_ORDER_PAYMENT = 'order_payment'
+    TYPE_ORDER_REFUND = 'order_refund'
+    TYPE_ADMIN_ADJUSTMENT = 'admin_adjustment'
+
+    TRANSACTION_TYPE_CHOICES = [
+        (TYPE_DEPOSIT, 'شارژ کیف پول'),
+        (TYPE_ORDER_PAYMENT, 'پرداخت سفارش غذا'),
+        (TYPE_ORDER_REFUND, 'استرداد لغو سفارش'),
+        (TYPE_ADMIN_ADJUSTMENT, 'اصلاح توسط مدیریت'),
+    ]
+
+    wallet = models.ForeignKey(
+        Wallet,
+        on_delete=models.CASCADE,
+        related_name="transactions",
+        db_index=True
+    )
+    amount = models.BigIntegerField(help_text="Amount in Tomans (positive for credit, negative for debit)")
+    balance_after = models.BigIntegerField(help_text="Wallet balance immediately after transaction")
+    transaction_type = models.CharField(
+        max_length=30,
+        choices=TRANSACTION_TYPE_CHOICES,
+        db_index=True
+    )
+    reservation = models.ForeignKey(
+        Reservation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="wallet_transactions"
+    )
+    payment = models.ForeignKey(
+        Payment,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="wallet_transactions"
+    )
+    description = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['wallet', '-created_at']),
+            models.Index(fields=['transaction_type', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.transaction_type}: {self.amount} Tomans (Wallet {self.wallet_id})"
+
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=User)
+def create_user_wallet_signal(sender, instance, created, **kwargs):
+    if created:
+        Wallet.objects.get_or_create(user=instance)
+
